@@ -43,7 +43,10 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut ambient_light: ResMut<AmbientLight>,
 ) {
+    ambient_light.color = Color::BLUE;
+
     commands.spawn((
         Camera3dBundle {
             transform: Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
