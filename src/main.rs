@@ -1,4 +1,5 @@
 use bevy::{
+    app::AppExit,
     core::Zeroable,
     input::{
         keyboard::KeyboardInput,
@@ -27,6 +28,7 @@ fn main() {
             PreUpdate,
             (
                 editor_state_change,
+                exit_listener,
                 (camera_rotation, freelook_input).run_if(in_state(EditorState::Fly)),
             ),
         )
@@ -45,7 +47,8 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut ambient_light: ResMut<AmbientLight>,
 ) {
-    ambient_light.color = Color::BLUE;
+    // ambient_light.color = Color::WHITE;
+    // ambient_light.brightness = 1.0;
 
     commands.spawn((
         Camera3dBundle {
@@ -219,6 +222,14 @@ fn camera_rotation(
         } else {
             // TODO: Handle no controllers / too many controllers gracefully..
             panic!("Exactly one FPCC is needed!");
+        }
+    }
+}
+
+fn exit_listener(mut input: EventReader<KeyboardInput>, mut exit_events: ResMut<Events<AppExit>>) {
+    for event in input.read() {
+        if event.key_code == KeyCode::Escape && event.state.is_pressed() {
+            exit_events.send_default();
         }
     }
 }
