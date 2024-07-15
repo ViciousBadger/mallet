@@ -12,7 +12,7 @@ use camera::{
     camera_rotation, freelook_input, freelook_input_reset, freelook_movement, FreelookCameraBundle,
 };
 use color_eyre::eyre::Result;
-use map::{deploy_added_elements, Brush, MapElement};
+use map::{deploy_added_elements, MapElement, PropFeature};
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 enum EditorState {
@@ -67,16 +67,15 @@ fn setup(
         ..default()
     });
 
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
-            shadows_enabled: true,
-            ..Default::default()
-        },
+    commands.spawn(MapElement::Prop {
         transform: Transform::from_xyz(4.0, 8.0, 4.0),
-        ..default()
+        features: vec![PropFeature::PointLightSource],
     });
 
-    commands.spawn(MapElement::Brush(Brush::default()));
+    commands.spawn(MapElement::Brush {
+        start: IVec3::ZERO,
+        end: IVec3::ONE,
+    });
 }
 
 fn grab_mouse(mut q_window: Query<&mut Window, With<PrimaryWindow>>) {
