@@ -1,4 +1,5 @@
 mod camera;
+mod map;
 mod util;
 
 use bevy::{
@@ -11,6 +12,7 @@ use camera::{
     camera_rotation, freelook_input, freelook_input_reset, freelook_movement, FreelookCameraBundle,
 };
 use color_eyre::eyre::Result;
+use map::{deploy_added_elements, Brush, MapElement};
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 enum EditorState {
@@ -26,6 +28,7 @@ fn main() -> Result<()> {
         .add_plugins(DefaultPlugins)
         .init_state::<EditorState>()
         .add_systems(Startup, setup)
+        .add_systems(First, deploy_added_elements)
         .add_systems(
             PreUpdate,
             (
@@ -73,12 +76,7 @@ fn setup(
         ..default()
     });
 
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-        material: materials.add(Color::rgb_u8(124, 144, 255)),
-        transform: Transform::from_xyz(0.0, 0.5, 0.0),
-        ..default()
-    });
+    commands.spawn(MapElement::Brush(Brush::default()));
 }
 
 fn grab_mouse(mut q_window: Query<&mut Window, With<PrimaryWindow>>) {
@@ -98,7 +96,6 @@ fn editor_state_change(
     current_state: Res<State<EditorState>>,
     mut next_state: ResMut<NextState<EditorState>>,
 ) {
-    // TODO: handle in a functional way based on game state (InGame or Editor::FlyMode..)
     for event in input.read() {
         if event.key_code == KeyCode::Tab && event.state.is_pressed() {
             next_state.set(match current_state.get() {
