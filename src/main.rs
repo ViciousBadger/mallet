@@ -4,12 +4,15 @@ mod util;
 
 use bevy::{
     app::AppExit,
+    asset::RenderAssetUsages,
     input::keyboard::KeyboardInput,
     prelude::*,
+    utils::tracing::instrument::WithSubscriber,
     window::{CursorGrabMode, PrimaryWindow},
 };
 use camera::{camera_rotation, freelook_input, freelook_input_reset, freelook_movement, Freelook};
 use color_eyre::eyre::Result;
+use csgrs::float_types::parry3d::na::Point3;
 use map::{deploy_added_elements, MapElement, PropFeature};
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
@@ -18,6 +21,8 @@ enum EditorState {
     Select,
     Fly,
 }
+
+type CSG = csgrs::csg::CSG<()>;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -77,10 +82,20 @@ fn setup(
         features: vec![PropFeature::PointLightSource],
     });
 
-    commands.spawn(MapElement::Brush {
-        start: IVec3::ZERO,
-        end: IVec3::ONE,
-    });
+    // commands.spawn(MapElement::Brush {
+    //     start: IVec3::ZERO,
+    //     end: IVec3::ONE,
+    // });
+
+    let cube = CSG::cube(None);
+    let sphere = CSG::sphere(None);
+
+    let sub = cube.subtract(&sphere);
+
+    commands.spawn((
+        Mesh3d(meshes.add(csg_to_mesh(&sub))),
+        MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
+    ));
 }
 
 fn grab_mouse(mut q_window: Query<&mut Window, With<PrimaryWindow>>) {
@@ -116,4 +131,35 @@ fn exit_listener(mut input: EventReader<KeyboardInput>, mut exit_events: ResMut<
             exit_events.send_default();
         }
     }
+}
+
+fn csg_to_mesh(input: &CSG) -> Mesh {
+    let mut vertices = Vec::<Vec3>::new();
+    let mut indices = Vec::<u32>::new();
+    let mut index_offset = 0;
+
+    for poly in input.polygons.iter() {
+        let tris = poly.triangulate();
+        for tri in &tris {
+            // Each tri is [Vertex; 3]
+            //  push the positions into `vertices`
+            //  build the index triplet for `indices`
+            for v in tri {
+                vertices.push(Vec3::new(v.pos.x as f32, v.pos.y as f32, v.pos.z as f32));
+            }
+            indices.push(index_offset);
+            indices.push(index_offset + 1);
+            indices.push(index_offset + 2);
+            index_offset += 3;
+        }
+    }
+
+    Mesh::new(
+        bevy::render::mesh::PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertices)
+    .with_inserted_indices(bevy::render::mesh::Indices::U32(indices))
+
+    // TriMesh::new(Vec<[Real; 3]>, Vec<[u32; 3]>)
 }
