@@ -36,12 +36,11 @@ pub fn deploy_added_elements(
     for (entity_id, element) in q_added_elements.iter() {
         match element {
             MapElement::Brush { start: _, end: _ } => {
-                commands.entity(entity_id).insert(PbrBundle {
-                    mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-                    material: materials.add(Color::rgb_u8(124, 144, 255)),
-                    transform: Transform::from_xyz(0.0, 0.5, 0.0),
-                    ..default()
-                });
+                commands.entity(entity_id).insert((
+                    Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+                    MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
+                    Transform::from_xyz(0.0, 0.5, 0.0),
+                ));
             }
             MapElement::Prop {
                 transform,
@@ -50,12 +49,9 @@ pub fn deploy_added_elements(
                 for feature in features {
                     match feature {
                         PropFeature::PointLightSource => {
-                            commands.entity(entity_id).insert(PointLightBundle {
-                                point_light: PointLight {
-                                    shadows_enabled: true,
-                                    ..Default::default()
-                                },
-                                ..default()
+                            commands.entity(entity_id).insert(PointLight {
+                                shadows_enabled: true,
+                                ..Default::default()
                             });
                         }
                     }
@@ -63,9 +59,7 @@ pub fn deploy_added_elements(
 
                 // Insert transform last
                 // (Some bundles add their own transform components but this will be overwritten here)
-                commands
-                    .entity(entity_id)
-                    .insert(TransformBundle::from_transform(*transform));
+                commands.entity(entity_id).insert(transform.clone());
             }
         };
     }

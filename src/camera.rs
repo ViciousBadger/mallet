@@ -32,6 +32,7 @@ pub fn camera_rotation(
 }
 
 #[derive(Component)]
+#[require(Camera3d, CameraRotator)]
 pub struct Freelook {
     target_move: Vec3,
     velocity: Vec3,
@@ -48,29 +49,22 @@ impl Default for Freelook {
     }
 }
 
-#[derive(Bundle)]
-pub struct FreelookCameraBundle {
-    pub camera_bundle: Camera3dBundle,
-    pub freelook: Freelook,
-    pub camera_rotator: CameraRotator,
-}
-
-impl Default for FreelookCameraBundle {
-    fn default() -> Self {
-        Self {
-            camera_bundle: Camera3dBundle {
-                transform: Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
-                projection: Projection::Perspective(PerspectiveProjection {
-                    fov: 72.0_f32.to_radians(),
-                    ..default()
-                }),
-                ..default()
-            },
-            freelook: Freelook::default(),
-            camera_rotator: CameraRotator::default(),
-        }
-    }
-}
+// impl Default for FreelookCameraBundle {
+//     fn default() -> Self {
+//         Self {
+//             camera_bundle: Camera3dBundle {
+//                 transform: Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
+//                 projection: Projection::Perspective(PerspectiveProjection {
+//                     fov: 72.0_f32.to_radians(),
+//                     ..default()
+//                 }),
+//                 ..default()
+//             },
+//             freelook: Freelook::default(),
+//             camera_rotator: CameraRotator::default(),
+//         }
+//     }
+// }
 
 pub fn freelook_input(
     mut q_freelook: Query<&mut Freelook>,
@@ -125,16 +119,13 @@ pub fn freelook_movement(mut q_freelook: Query<(&mut Freelook, &mut Transform)>,
         let adjusted_move =
             Vec3::new(xz_movement.x, freelook.target_move.y, xz_movement.y) * max_speed;
 
-        freelook.velocity = move_toward_3d(
-            freelook.velocity,
-            adjusted_move,
-            time.delta_seconds() * accel,
-        );
+        freelook.velocity =
+            move_toward_3d(freelook.velocity, adjusted_move, time.delta_secs() * accel);
 
         if freelook.velocity.length() > max_speed {
             freelook.velocity = freelook.velocity.normalize_or_zero() * max_speed;
         }
 
-        transform.translation += freelook.velocity * time.delta_seconds();
+        transform.translation += freelook.velocity * time.delta_secs();
     }
 }

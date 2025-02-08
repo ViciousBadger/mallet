@@ -8,9 +8,7 @@ use bevy::{
     prelude::*,
     window::{CursorGrabMode, PrimaryWindow},
 };
-use camera::{
-    camera_rotation, freelook_input, freelook_input_reset, freelook_movement, FreelookCameraBundle,
-};
+use camera::{camera_rotation, freelook_input, freelook_input_reset, freelook_movement, Freelook};
 use color_eyre::eyre::Result;
 use map::{deploy_added_elements, MapElement, PropFeature};
 
@@ -58,14 +56,21 @@ fn setup(
     // ambient_light.color = Color::WHITE;
     // ambient_light.brightness = 1.0;
 
-    commands.spawn(FreelookCameraBundle::default());
+    //commands.spawn(FreelookCameraBundle::default());
+    commands.spawn((
+        Freelook::default(),
+        Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Projection::Perspective(PerspectiveProjection {
+            fov: 72.0_f32.to_radians(),
+            ..default()
+        }),
+    ));
 
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Circle::new(4.0)),
-        material: materials.add(Color::WHITE),
-        transform: Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-        ..default()
-    });
+    commands.spawn((
+        Mesh3d(meshes.add(Circle::new(4.0))),
+        MeshMaterial3d(materials.add(Color::WHITE)),
+        Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+    ));
 
     commands.spawn(MapElement::Prop {
         transform: Transform::from_xyz(4.0, 8.0, 4.0),
@@ -80,14 +85,14 @@ fn setup(
 
 fn grab_mouse(mut q_window: Query<&mut Window, With<PrimaryWindow>>) {
     let mut window = q_window.single_mut();
-    window.cursor.grab_mode = CursorGrabMode::Locked;
-    window.cursor.visible = false;
+    window.cursor_options.grab_mode = CursorGrabMode::Locked;
+    window.cursor_options.visible = false;
 }
 
 fn release_mouse(mut q_window: Query<&mut Window, With<PrimaryWindow>>) {
     let mut window = q_window.single_mut();
-    window.cursor.grab_mode = CursorGrabMode::None;
-    window.cursor.visible = true;
+    window.cursor_options.grab_mode = CursorGrabMode::None;
+    window.cursor_options.visible = true;
 }
 
 fn editor_state_change(
