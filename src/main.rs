@@ -82,15 +82,20 @@ fn setup(
 
     // Central room
     rooms.push(Room {
-        start: Vec3::new(-2.0, 0.0, -2.0),
-        end: Vec3::new(2.0, 3.0, 2.0),
+        start: Vec3::new(5.0, 0.0, -2.0),
+        end: Vec3::new(10.0, 3.0, 2.0),
     });
 
     // Hallways
-    rooms.push(Room {
-        start: Vec3::new(-4.0, 0.0, -1.0),
-        end: Vec3::new(4.0, 2.0, 1.0),
-    });
+    // rooms.push(Room {
+    //     start: Vec3::new(-4.0, 0.0, -1.0),
+    //     end: Vec3::new(4.0, 2.0, 1.0),
+    // });
+
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::new(Vec3::X, Vec2::new(1.0, 1.0)))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(255, 102, 144))),
+    ));
 
     for room in rooms {
         // commands.spawn((
@@ -100,8 +105,11 @@ fn setup(
         // ));
 
         for plane in room.planes() {
+            info!("{:?}", plane);
+            let t = Transform::from_translation(plane.normal.as_vec3() * plane.offset);
+            info!("{:?}", t);
             commands.spawn((
-                Transform::from_translation(plane.normal.as_vec3() * plane.dist),
+                t,
                 Mesh3d(meshes.add(Plane3d::new(plane.normal.as_vec3(), Vec2::new(1.0, 1.0)))),
                 MeshMaterial3d(materials.add(Color::srgb_u8(124, 255, 144))),
             ));

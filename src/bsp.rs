@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 
+#[derive(Debug)]
 pub struct BspPlane {
     pub normal: Dir3,
-    pub dist: f32,
+    pub offset: f32,
 }
 
 pub enum BspNode {
@@ -40,32 +41,32 @@ impl Room {
             // X+
             BspPlane {
                 normal: Dir3::X,
-                dist: self.start.x,
+                offset: self.end.x,
             },
             // X-
             BspPlane {
                 normal: Dir3::NEG_X,
-                dist: self.end.x,
+                offset: -self.start.x,
             },
             // Z+
             BspPlane {
                 normal: Dir3::Z,
-                dist: self.start.z,
+                offset: self.end.z,
             },
             // Z-
             BspPlane {
                 normal: Dir3::NEG_Z,
-                dist: self.end.z,
+                offset: -self.start.z,
             },
             // Y+
             BspPlane {
                 normal: Dir3::Y,
-                dist: self.start.y,
+                offset: self.end.y,
             },
             // Y-
             BspPlane {
                 normal: Dir3::NEG_Y,
-                dist: self.end.y,
+                offset: -self.start.y,
             },
         ]
     }
