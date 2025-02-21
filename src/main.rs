@@ -5,8 +5,10 @@ mod util;
 
 use bevy::{
     app::AppExit,
+    asset::RenderAssetUsages,
     input::common_conditions::input_just_pressed,
     prelude::*,
+    reflect::DynamicTypePath,
     window::{CursorGrabMode, PrimaryWindow},
 };
 use bsp::Room;
@@ -27,7 +29,7 @@ fn main() -> Result<()> {
     App::new()
         .add_plugins(DefaultPlugins)
         .init_state::<EditorState>()
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, grid))
         .add_systems(First, deploy_added_elements)
         .add_systems(
             PreUpdate,
@@ -86,23 +88,23 @@ fn setup(
         end: Vec3::new(10.0, 3.0, 2.0),
     });
 
-    // Hallways
-    // rooms.push(Room {
-    //     start: Vec3::new(-4.0, 0.0, -1.0),
-    //     end: Vec3::new(4.0, 2.0, 1.0),
-    // });
+    // Hallway
+    rooms.push(Room {
+        start: Vec3::new(-2.0, 0.0, -1.0),
+        end: Vec3::new(5.0, 2.0, 1.0),
+    });
 
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::new(Vec3::X, Vec2::new(1.0, 1.0)))),
+        Mesh3d(meshes.add(Sphere::new(1.0))),
         MeshMaterial3d(materials.add(Color::srgb_u8(255, 102, 144))),
     ));
 
     for room in rooms {
-        // commands.spawn((
-        //     Transform::from_translation(room.center()),
-        //     Mesh3d(meshes.add(Cuboid::from_size(room.size()))),
-        //     MeshMaterial3d(materials.add(Color::srgba_u8(124, 144, 255, 128))),
-        // ));
+        commands.spawn((
+            Transform::from_translation(room.center()),
+            Mesh3d(meshes.add(room.build_mesh())),
+            MeshMaterial3d(materials.add(Color::srgba_u8(124, 144, 255, 128))),
+        ));
 
         for plane in room.planes() {
             info!("{:?}", plane);
@@ -110,8 +112,8 @@ fn setup(
             info!("{:?}", t);
             commands.spawn((
                 t,
-                Mesh3d(meshes.add(Plane3d::new(plane.normal.as_vec3(), Vec2::new(1.0, 1.0)))),
-                MeshMaterial3d(materials.add(Color::srgb_u8(124, 255, 144))),
+                Mesh3d(meshes.add(Plane3d::new(plane.normal.as_vec3(), Vec2::new(0.33, 0.33)))),
+                MeshMaterial3d(materials.add(Color::srgba_u8(124, 255, 144, 128))),
             ));
         }
     }
@@ -146,4 +148,34 @@ fn swap_editor_state(
 
 fn exit_app(mut exit_events: ResMut<Events<AppExit>>) {
     exit_events.send_default();
+}
+
+fn grid(
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+) {
+    let mut grid_mesh = Mesh::new(
+        bevy::render::mesh::PrimitiveTopology::LineList,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+
+    const GRID_SIZE: i32 = 1000;
+
+    let mut vertices = Vec::<[f32; 3]>::new();
+
+    for i in -GRID_SIZE..=GRID_SIZE {
+        vertices.push([i as f32, 0.0, -GRID_SIZE as f32]);
+        vertices.push([i as f32, 0.0, GRID_SIZE as f32]);
+        vertices.push([-GRID_SIZE as f32, 0.0, i as f32]);
+        vertices.push([GRID_SIZE as f32, 0.0, i as f32]);
+    }
+
+    grid_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
+
+    commands.spawn((
+        Mesh3d(meshes.add(grid_mesh)),
+        MeshMaterial3d(materials.add(Color::srgba(1.0, 1.0, 1.0, 0.5))),
+    ));
+    info!("ok");
 }

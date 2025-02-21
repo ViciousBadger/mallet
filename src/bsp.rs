@@ -29,44 +29,52 @@ pub struct Room {
 
 impl Room {
     pub fn center(&self) -> Vec3 {
-        (self.start / self.end) / 2.0
+        (self.start + self.end) / 2.0
     }
 
     pub fn size(&self) -> Vec3 {
         self.end - self.start
     }
 
+    pub fn build_mesh(&self) -> Mesh {
+        Cuboid::from_size(self.size())
+            .mesh()
+            .build()
+            .with_inverted_winding()
+            .unwrap()
+    }
+
     pub fn planes(&self) -> Vec<BspPlane> {
         vec![
             // X+
             BspPlane {
-                normal: Dir3::X,
-                offset: self.end.x,
+                normal: Dir3::NEG_X,
+                offset: -self.end.x,
             },
             // X-
             BspPlane {
-                normal: Dir3::NEG_X,
-                offset: -self.start.x,
+                normal: Dir3::X,
+                offset: self.start.x,
             },
             // Z+
             BspPlane {
-                normal: Dir3::Z,
-                offset: self.end.z,
+                normal: Dir3::NEG_Z,
+                offset: -self.end.z,
             },
             // Z-
             BspPlane {
-                normal: Dir3::NEG_Z,
-                offset: -self.start.z,
+                normal: Dir3::Z,
+                offset: self.start.z,
             },
             // Y+
             BspPlane {
-                normal: Dir3::Y,
-                offset: self.end.y,
+                normal: Dir3::NEG_Y,
+                offset: -self.end.y,
             },
             // Y-
             BspPlane {
-                normal: Dir3::NEG_Y,
-                offset: -self.start.y,
+                normal: Dir3::Y,
+                offset: self.start.y,
             },
         ]
     }
