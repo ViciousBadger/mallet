@@ -2,7 +2,10 @@ use std::f32::consts::FRAC_PI_2;
 
 use bevy::{
     asset::RenderAssetUsages,
-    input::{common_conditions::input_just_pressed, mouse::MouseMotion},
+    input::{
+        common_conditions::{input_just_pressed, input_just_released},
+        mouse::MouseMotion,
+    },
     math::VectorSpace,
     prelude::*,
     window::PrimaryWindow,
@@ -19,9 +22,12 @@ pub fn plugin(app: &mut App) {
                 switch_sel_axis(SelAxis::X).run_if(input_just_pressed(KeyCode::KeyX)),
                 switch_sel_axis(SelAxis::Z).run_if(input_just_pressed(KeyCode::KeyZ)),
                 switch_sel_axis(SelAxis::Y).run_if(input_just_pressed(KeyCode::KeyC)),
+                toggle_snap.run_if(input_just_pressed(KeyCode::KeyT)),
+                toggle_snap.run_if(input_just_pressed(KeyCode::AltLeft)),
+                toggle_snap.run_if(input_just_released(KeyCode::AltLeft)),
             ),
         )
-        .add_systems(Update, (flip_sel_grid));
+        .add_systems(Update, flip_sel_grid);
 }
 
 #[derive(Default, Clone)]
@@ -54,6 +60,7 @@ pub struct Sel {
     pub position: Option<Vec3>,
     pub axis: SelAxis,
     pub axis_offset: f32,
+    pub snap: bool,
 }
 
 impl Sel {
@@ -81,7 +88,7 @@ fn init(
 ) {
     commands.spawn((
         SelMarker,
-        Mesh3d(meshes.add(Sphere::new(1.0))),
+        Mesh3d(meshes.add(Sphere::new(0.1))),
         MeshMaterial3d(materials.add(Color::srgb_u8(255, 102, 144))),
     ));
 }
@@ -149,6 +156,12 @@ pub fn switch_sel_axis(new_axis: SelAxis) -> impl Fn(ResMut<Sel>, EventWriter<Se
     }
 }
 
+pub fn toggle_snap(mut sel: ResMut<Sel>) {
+    sel.snap = !sel.snap;
+    // TODO: should axis offset be adjusted here?  should it be "reset" to the un-snapped offset
+    // when snap is off again?
+}
+
 pub fn update_sel_from_mouse(
     q_window: Query<&Window, With<PrimaryWindow>>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
@@ -162,6 +175,7 @@ pub fn update_sel_from_mouse(
             let plane = sel.axis.as_plane();
             if let Some(dist) = ray.intersect_plane(sel.grid_center(), plane) {
                 let point = ray.get_point(dist);
+                let point = if sel.snap { Vec3::round(point) } else { point };
                 sel.position = Some(point);
                 if let Ok(mut marker_tranform) = q_sel_marker.get_single_mut() {
                     marker_tranform.translation = point;
