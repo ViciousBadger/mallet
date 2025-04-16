@@ -6,12 +6,12 @@ use bevy::{
 use crate::util::move_toward_3d;
 
 #[derive(Component, Default)]
-pub struct CameraRotator {
+pub struct Gimbal {
     yaw_pitch: Vec2,
 }
 
-pub fn camera_rotation(
-    mut q_camera_rotator: Query<(&mut CameraRotator, &mut Transform)>,
+pub fn gimbal_mouse_rotation(
+    mut q_camera_rotator: Query<(&mut Gimbal, &mut Transform)>,
     mut mouse_motion: EventReader<MouseMotion>,
 ) {
     for motion in mouse_motion.read() {
@@ -28,7 +28,7 @@ pub fn camera_rotation(
 }
 
 #[derive(Component)]
-#[require(Camera3d, CameraRotator)]
+#[require(Camera3d, Gimbal)]
 pub struct Freelook {
     target_move: Vec3,
     velocity: Vec3,
