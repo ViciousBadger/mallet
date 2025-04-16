@@ -6,9 +6,10 @@ mod util;
 use bevy::{
     app::AppExit,
     asset::RenderAssetUsages,
-    input::common_conditions::input_just_pressed,
+    input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
     reflect::DynamicTypePath,
+    state::state::FreelyMutableState,
     window::{CursorGrabMode, PrimaryWindow},
 };
 use bsp::Room;
@@ -29,12 +30,14 @@ fn main() -> Result<()> {
     App::new()
         .add_plugins(DefaultPlugins)
         .init_state::<EditorState>()
-        .add_systems(Startup, (setup, grid))
+        .add_systems(Startup, (setup, create_world_grid))
         .add_systems(First, deploy_added_elements)
         .add_systems(
             PreUpdate,
             (
-                swap_editor_state.run_if(input_just_pressed(KeyCode::Tab)),
+                //swap_editor_state.run_if(input_just_pressed(MouseButton::Right)),
+                enter_state(EditorState::Fly).run_if(input_just_pressed(MouseButton::Right)),
+                enter_state(EditorState::Select).run_if(input_just_released(MouseButton::Right)),
                 exit_app.run_if(input_just_pressed(KeyCode::Escape)),
                 freelook_input,
                 camera_rotation.run_if(in_state(EditorState::Fly)),
@@ -146,11 +149,23 @@ fn swap_editor_state(
     });
 }
 
+fn enter_state<S: FreelyMutableState>(new_state: S) -> impl Fn(ResMut<NextState<S>>) {
+    move |mut next_state| next_state.set(new_state.clone())
+}
+
+fn enter_fly_mode(mut next_state: ResMut<NextState<EditorState>>) {
+    next_state.set(EditorState::Fly);
+}
+
+fn enter_select_mode(mut next_state: ResMut<NextState<EditorState>>) {
+    next_state.set(EditorState::Select);
+}
+
 fn exit_app(mut exit_events: ResMut<Events<AppExit>>) {
     exit_events.send_default();
 }
 
-fn grid(
+fn create_world_grid(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
@@ -177,5 +192,4 @@ fn grid(
         Mesh3d(meshes.add(grid_mesh)),
         MeshMaterial3d(materials.add(Color::srgba(1.0, 1.0, 1.0, 0.5))),
     ));
-    info!("ok");
 }
