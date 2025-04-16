@@ -7,9 +7,11 @@ use bevy::{
     asset::RenderAssetUsages,
     input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
+    winit::WinitSettings,
 };
 use camera::{
-    freelook_input, freelook_input_reset, freelook_movement, gimbal_mouse_rotation, Freelook,
+    freelook_input, freelook_input_reset, freelook_movement, gimbal_mouse_rotation,
+    redraw_window_on_velocity, Freelook,
 };
 use color_eyre::eyre::Result;
 use util::{enter_state, grab_mouse, release_mouse};
@@ -27,6 +29,8 @@ fn main() -> Result<()> {
     App::new()
         .add_plugins(DefaultPlugins)
         .init_state::<EditorState>()
+        // Only update when there is user input. Should be disabled when in-game
+        .insert_resource(WinitSettings::desktop_app())
         .add_systems(Startup, (setup, create_world_grid))
         .add_systems(
             PreUpdate,
@@ -39,7 +43,7 @@ fn main() -> Result<()> {
                 gimbal_mouse_rotation.run_if(in_state(EditorState::Fly)),
             ),
         )
-        .add_systems(Update, freelook_movement)
+        .add_systems(Update, (freelook_movement, redraw_window_on_velocity))
         .add_systems(OnEnter(EditorState::Fly), grab_mouse)
         .add_systems(
             OnExit(EditorState::Fly),

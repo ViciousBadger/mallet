@@ -1,6 +1,7 @@
 use bevy::{
     input::mouse::{MouseMotion, MouseWheel},
     prelude::*,
+    window::RequestRedraw,
 };
 
 use crate::util::move_toward_3d;
@@ -102,4 +103,16 @@ pub fn freelook_movement(mut q_freelook: Query<(&mut Freelook, &mut Transform)>,
     }
 
     transform.translation += freelook.velocity * time.delta_secs();
+}
+
+pub fn redraw_window_on_velocity(
+    q_freelook: Query<&Freelook>,
+    mut request_redraw_events: EventWriter<RequestRedraw>,
+) {
+    if q_freelook
+        .iter()
+        .any(|f| f.velocity.length() > 0.001 || f.target_move.length() > 0.001)
+    {
+        request_redraw_events.send(RequestRedraw);
+    }
 }
