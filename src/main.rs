@@ -1,5 +1,6 @@
 mod camera;
 mod map;
+mod selection;
 mod util;
 
 use bevy::{
@@ -27,7 +28,7 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins((DefaultPlugins, selection::plugin))
         .init_state::<EditorState>()
         // Only update when there is user input. Should be disabled when in-game
         .insert_resource(WinitSettings::desktop_app())
@@ -63,6 +64,10 @@ fn setup(mut commands: Commands) {
             ..default()
         }),
     ));
+    commands.spawn((
+        DirectionalLight::default(),
+        Transform::from_rotation(Quat::from_rotation_x(-0.8)),
+    ));
 }
 
 fn exit_app(mut exit_events: ResMut<Events<AppExit>>) {
@@ -79,7 +84,7 @@ fn create_world_grid(
         RenderAssetUsages::RENDER_WORLD,
     );
 
-    const GRID_SIZE: i32 = 1000;
+    const GRID_SIZE: i32 = 128;
 
     let mut vertices = Vec::<[f32; 3]>::new();
 
