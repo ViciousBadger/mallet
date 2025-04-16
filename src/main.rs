@@ -32,7 +32,7 @@ fn main() -> Result<()> {
         .init_state::<EditorState>()
         // Only update when there is user input. Should be disabled when in-game
         .insert_resource(WinitSettings::desktop_app())
-        .add_systems(Startup, (setup, create_world_grid))
+        .add_systems(Startup, setup)
         .add_systems(
             PreUpdate,
             (
@@ -72,33 +72,4 @@ fn setup(mut commands: Commands) {
 
 fn exit_app(mut exit_events: ResMut<Events<AppExit>>) {
     exit_events.send_default();
-}
-
-fn create_world_grid(
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut commands: Commands,
-) {
-    let mut grid_mesh = Mesh::new(
-        bevy::render::mesh::PrimitiveTopology::LineList,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-
-    const GRID_SIZE: i32 = 128;
-
-    let mut vertices = Vec::<[f32; 3]>::new();
-
-    for i in -GRID_SIZE..=GRID_SIZE {
-        vertices.push([i as f32, 0.0, -GRID_SIZE as f32]);
-        vertices.push([i as f32, 0.0, GRID_SIZE as f32]);
-        vertices.push([-GRID_SIZE as f32, 0.0, i as f32]);
-        vertices.push([GRID_SIZE as f32, 0.0, i as f32]);
-    }
-
-    grid_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
-
-    commands.spawn((
-        Mesh3d(meshes.add(grid_mesh)),
-        MeshMaterial3d(materials.add(Color::srgba(1.0, 1.0, 1.0, 0.5))),
-    ));
 }
