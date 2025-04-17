@@ -9,28 +9,10 @@ use bevy::{
     math::VectorSpace,
     prelude::*,
     window::PrimaryWindow,
+    winit::select_monitor,
 };
 
-pub fn plugin(app: &mut App) {
-    app.init_resource::<Sel>()
-        .add_event::<SelChanged>()
-        .add_systems(Startup, (init, create_grid))
-        .add_systems(
-            PreUpdate,
-            (
-                update_sel_from_mouse.run_if(on_event::<MouseMotion>),
-                switch_sel_axis(SelAxis::X).run_if(input_just_pressed(KeyCode::KeyX)),
-                switch_sel_axis(SelAxis::Z).run_if(input_just_pressed(KeyCode::KeyZ)),
-                switch_sel_axis(SelAxis::Y).run_if(input_just_pressed(KeyCode::KeyC)),
-                toggle_snap.run_if(input_just_pressed(KeyCode::KeyT)),
-                toggle_snap.run_if(input_just_pressed(KeyCode::AltLeft)),
-                toggle_snap.run_if(input_just_released(KeyCode::AltLeft)),
-            ),
-        )
-        .add_systems(Update, reposition_sel_grid.run_if(on_event::<SelChanged>));
-}
-
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub enum SelAxis {
     X,
     #[default]
@@ -58,6 +40,7 @@ impl SelAxis {
 #[derive(Resource, Default)]
 pub struct Sel {
     pub position: Option<Vec3>,
+    // target object (entity id?)
     pub axis: SelAxis,
     pub axis_offset: f32,
     pub snap: bool,
@@ -83,7 +66,39 @@ pub struct SelGrid;
 #[derive(Event)]
 pub struct SelChanged;
 
-fn init(
+#[derive(States, Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub enum SelMode {
+    #[default]
+    Normal,
+    // i guess this should be more complex than a state, its one of those actions you want to be
+    // able to press escape to cancel, like in blender.
+    MoveAxisOffset,
+}
+
+pub fn plugin(app: &mut App) {
+    app.init_resource::<Sel>()
+        .add_event::<SelChanged>()
+        .add_systems(Startup, (init_selection, create_grid))
+        .init_state::<SelMode>()
+        .add_systems(
+            PreUpdate,
+            (
+                update_sel_from_mouse
+                    .run_if(on_event::<MouseMotion>.and(in_state(SelMode::Normal))),
+                move_axis_offset
+                    .run_if(on_event::<MouseMotion>.and(in_state(SelMode::MoveAxisOffset))),
+                switch_sel_axis(SelAxis::X).run_if(input_just_pressed(KeyCode::KeyX)),
+                switch_sel_axis(SelAxis::Z).run_if(input_just_pressed(KeyCode::KeyZ)),
+                switch_sel_axis(SelAxis::Y).run_if(input_just_pressed(KeyCode::KeyC)),
+                toggle_snap.run_if(input_just_pressed(KeyCode::KeyT)),
+                toggle_snap.run_if(input_just_pressed(KeyCode::AltLeft)),
+                toggle_snap.run_if(input_just_released(KeyCode::AltLeft)),
+            ),
+        )
+        .add_systems(Update, reposition_sel_grid.run_if(on_event::<SelChanged>));
+}
+
+fn init_selection(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
@@ -135,18 +150,29 @@ fn reposition_sel_grid(sel: Res<Sel>, mut q_grid: Query<&mut Transform, With<Sel
     }
 }
 
-pub fn switch_sel_axis(new_axis: SelAxis) -> impl Fn(ResMut<Sel>, EventWriter<SelChanged>) {
-    move |mut sel, mut sel_changed| {
-        if let Some(selected_pos) = sel.position {
-            sel.axis_offset = match new_axis {
-                SelAxis::X => selected_pos.x,
-                SelAxis::Y => selected_pos.y,
-                SelAxis::Z => selected_pos.z,
+pub fn switch_sel_axis(
+    new_axis: SelAxis,
+) -> impl Fn(ResMut<Sel>, Res<State<SelMode>>, ResMut<NextState<SelMode>>, EventWriter<SelChanged>)
+{
+    move |mut sel, current_sel_mode, mut next_sel_mode, mut sel_changed| {
+        if sel.axis == new_axis {
+            next_sel_mode.set(if current_sel_mode.get() == &SelMode::MoveAxisOffset {
+                SelMode::Normal
+            } else {
+                SelMode::MoveAxisOffset
+            });
+        } else {
+            next_sel_mode.set(SelMode::Normal);
+            if let Some(selected_pos) = sel.position {
+                sel.axis_offset = match new_axis {
+                    SelAxis::X => selected_pos.x,
+                    SelAxis::Y => selected_pos.y,
+                    SelAxis::Z => selected_pos.z,
+                }
             }
+            sel.axis = new_axis.clone();
+            sel_changed.send(SelChanged);
         }
-
-        sel.axis = new_axis.clone();
-        sel_changed.send(SelChanged);
     }
 }
 
@@ -155,6 +181,22 @@ pub fn toggle_snap(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChanged
     sel_changed.send(SelChanged);
     // TODO: Should the grid offset snap into place when toggling snap? Right now it de-snaps again
     // when snap is disabled.
+}
+
+pub fn move_axis_offset(
+    mut mouse_motion: EventReader<MouseMotion>,
+    mut sel: ResMut<Sel>,
+    mut sel_changed: EventWriter<SelChanged>,
+) {
+    let mut changed = false;
+    for motion in mouse_motion.read() {
+        // dumb way
+        sel.axis_offset -= motion.delta.y;
+        changed = true;
+    }
+    if changed {
+        sel_changed.send(SelChanged);
+    }
 }
 
 pub fn update_sel_from_mouse(
