@@ -28,6 +28,13 @@ impl SelAxis {
             SelAxis::Z => InfinitePlane3d::new(Dir3::Z),
         }
     }
+    pub fn as_plane_parallel(&self) -> InfinitePlane3d {
+        match self {
+            SelAxis::X => InfinitePlane3d::new(Dir3::Y),
+            SelAxis::Y => InfinitePlane3d::new(Dir3::X),
+            SelAxis::Z => InfinitePlane3d::new(Dir3::Y),
+        }
+    }
     pub fn as_unit_vec(&self) -> Vec3 {
         match self {
             SelAxis::X => Vec3::X,
@@ -184,18 +191,26 @@ pub fn toggle_snap(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChanged
 }
 
 pub fn move_axis_offset(
-    mut mouse_motion: EventReader<MouseMotion>,
+    q_window: Query<&Window, With<PrimaryWindow>>,
+    q_camera: Query<(&Camera, &GlobalTransform)>,
+    mut q_sel_marker: Query<&mut Transform, With<SelMarker>>,
     mut sel: ResMut<Sel>,
     mut sel_changed: EventWriter<SelChanged>,
 ) {
-    let mut changed = false;
-    for motion in mouse_motion.read() {
-        // dumb way
-        sel.axis_offset -= motion.delta.y;
-        changed = true;
-    }
-    if changed {
-        sel_changed.send(SelChanged);
+    let window = q_window.single();
+    if let Some(mouse_pos) = window.cursor_position() {
+        let (cam, cam_trans) = q_camera.single();
+        if let Ok(ray) = cam.viewport_to_world(cam_trans, mouse_pos) {
+            let plane = sel.axis.as_plane_parallel();
+            if let Some(dist) = ray.intersect_plane(Vec3::ZERO, plane) {
+                let point = ray.get_point(dist);
+                let point = if sel.snap { Vec3::round(point) } else { point };
+
+                sel.axis_offset = point.y;
+
+                sel_changed.send(SelChanged);
+            }
+        }
     }
 }
 

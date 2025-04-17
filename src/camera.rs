@@ -92,17 +92,27 @@ pub fn freelook_movement(mut q_freelook: Query<(&mut Freelook, &mut Transform)>,
     ));
 
     let max_speed = (freelook.speed as f32).powf(1.5);
-    let accel = max_speed * 4.0;
+    let accel = max_speed * 8.0;
 
     let adjusted_move = Vec3::new(xz_movement.x, freelook.target_move.y, xz_movement.y) * max_speed;
 
-    freelook.velocity = move_toward_3d(freelook.velocity, adjusted_move, time.delta_secs() * accel);
+    freelook.velocity = move_toward_3d(
+        freelook.velocity,
+        adjusted_move,
+        time.delta_secs() * accel * 0.5,
+    );
 
-    if freelook.velocity.length() > max_speed {
-        freelook.velocity = freelook.velocity.normalize_or_zero() * max_speed;
-    }
+    // if freelook.velocity.length() > max_speed {
+    //     freelook.velocity = freelook.velocity.normalize_or_zero() * max_speed;
+    // }
 
     transform.translation += freelook.velocity * time.delta_secs();
+
+    freelook.velocity = move_toward_3d(
+        freelook.velocity,
+        adjusted_move,
+        time.delta_secs() * accel * 0.5,
+    );
 }
 
 pub fn redraw_window_on_velocity(

@@ -31,7 +31,7 @@ fn main() -> Result<()> {
         .add_plugins((DefaultPlugins, selection::plugin))
         .init_state::<EditorState>()
         // Only update when there is user input. Should be disabled when in-game
-        .insert_resource(WinitSettings::desktop_app())
+        //.insert_resource(WinitSettings::desktop_app())
         .add_systems(Startup, setup)
         .add_systems(
             PreUpdate,
