@@ -13,7 +13,7 @@ use bevy::{
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<Sel>()
-        .add_event::<SelAxisChanged>()
+        .add_event::<SelChanged>()
         .add_systems(Startup, (init, create_grid))
         .add_systems(
             PreUpdate,
@@ -27,7 +27,7 @@ pub fn plugin(app: &mut App) {
                 toggle_snap.run_if(input_just_released(KeyCode::AltLeft)),
             ),
         )
-        .add_systems(Update, flip_sel_grid);
+        .add_systems(Update, reposition_sel_grid.run_if(on_event::<SelChanged>));
 }
 
 #[derive(Default, Clone)]
@@ -65,7 +65,12 @@ pub struct Sel {
 
 impl Sel {
     pub fn grid_center(&self) -> Vec3 {
-        self.axis.as_unit_vec() * self.axis_offset
+        self.axis.as_unit_vec()
+            * if self.snap {
+                self.axis_offset.round()
+            } else {
+                self.axis_offset
+            }
     }
 }
 
@@ -76,10 +81,7 @@ pub struct SelMarker;
 pub struct SelGrid;
 
 #[derive(Event)]
-pub struct SelAxisChanged {
-    axis: SelAxis,
-    axis_offset: f32,
-}
+pub struct SelChanged;
 
 fn init(
     mut meshes: ResMut<Assets<Mesh>>,
@@ -123,23 +125,18 @@ fn create_grid(
     ));
 }
 
-fn flip_sel_grid(
-    mut q_grid: Query<&mut Transform, With<SelGrid>>,
-    mut changed: EventReader<SelAxisChanged>,
-) {
+fn reposition_sel_grid(sel: Res<Sel>, mut q_grid: Query<&mut Transform, With<SelGrid>>) {
     let mut trans = q_grid.single_mut();
-    if let Some(changed_ev) = changed.read().last() {
-        trans.translation = changed_ev.axis.as_unit_vec() * changed_ev.axis_offset;
-        trans.rotation = match changed_ev.axis {
-            SelAxis::X => Quat::from_rotation_z(FRAC_PI_2),
-            SelAxis::Y => Quat::IDENTITY,
-            SelAxis::Z => Quat::from_rotation_x(FRAC_PI_2),
-        }
+    trans.translation = sel.grid_center();
+    trans.rotation = match sel.axis {
+        SelAxis::X => Quat::from_rotation_z(FRAC_PI_2),
+        SelAxis::Y => Quat::IDENTITY,
+        SelAxis::Z => Quat::from_rotation_x(FRAC_PI_2),
     }
 }
 
-pub fn switch_sel_axis(new_axis: SelAxis) -> impl Fn(ResMut<Sel>, EventWriter<SelAxisChanged>) {
-    move |mut sel, mut sel_axis_changed| {
+pub fn switch_sel_axis(new_axis: SelAxis) -> impl Fn(ResMut<Sel>, EventWriter<SelChanged>) {
+    move |mut sel, mut sel_changed| {
         if let Some(selected_pos) = sel.position {
             sel.axis_offset = match new_axis {
                 SelAxis::X => selected_pos.x,
@@ -149,17 +146,15 @@ pub fn switch_sel_axis(new_axis: SelAxis) -> impl Fn(ResMut<Sel>, EventWriter<Se
         }
 
         sel.axis = new_axis.clone();
-        sel_axis_changed.send(SelAxisChanged {
-            axis: new_axis.clone(),
-            axis_offset: sel.axis_offset,
-        });
+        sel_changed.send(SelChanged);
     }
 }
 
-pub fn toggle_snap(mut sel: ResMut<Sel>) {
+pub fn toggle_snap(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChanged>) {
     sel.snap = !sel.snap;
-    // TODO: should axis offset be adjusted here?  should it be "reset" to the un-snapped offset
-    // when snap is off again?
+    sel_changed.send(SelChanged);
+    // TODO: Should the grid offset snap into place when toggling snap? Right now it de-snaps again
+    // when snap is disabled.
 }
 
 pub fn update_sel_from_mouse(
