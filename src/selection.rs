@@ -1,9 +1,5 @@
-use std::f32::consts::FRAC_PI_2;
-
 use bevy::{
-    asset::RenderAssetUsages,
     color::palettes::css,
-    gizmos::grid,
     input::{
         common_conditions::{input_just_pressed, input_just_released},
         mouse::MouseMotion,
@@ -37,7 +33,7 @@ impl SelAxis {
 #[derive(Resource, Default)]
 pub struct Sel {
     pub position: Vec3,
-    // target object (entity id?)
+    pub target: Option<Entity>,
     pub axis: SelAxis,
     pub axis_offset: f32,
     pub snap: bool,

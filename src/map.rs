@@ -1,31 +1,55 @@
-use bevy::math::{Mat4, Vec3};
+use bevy::math::Vec3;
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::BTreeSet,
+    hash::{Hash, Hasher},
+};
 use ulid::Ulid;
+
+use crate::util::IdGen;
 
 #[derive(Serialize, Deserialize)]
 pub struct Map {
-    pub nodes: Vec<MapNode>,
+    pub nodes: BTreeSet<MapNode>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct MapNode {
     pub id: Ulid,
     pub name: String,
-    pub transform: Mat4,
     pub kind: MapNodeKind,
 }
 
+impl Hash for MapNode {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Eq for MapNode {}
+impl PartialEq for MapNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+
+impl Ord for MapNode {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+impl PartialOrd for MapNode {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl MapNode {
-    pub fn new(kind: MapNodeKind) -> Self {
-        let id = Ulid::new();
+    pub fn new(id_gen: &mut IdGen, kind: MapNodeKind) -> Self {
+        let id = id_gen.generate();
         let name = format!("{}-{}", id, kind.name());
-        let transform = Mat4::IDENTITY;
-        Self {
-            id,
-            name,
-            transform,
-            kind,
-        }
+        Self { id, name, kind }
     }
 }
 

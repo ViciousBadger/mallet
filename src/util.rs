@@ -3,6 +3,22 @@ use bevy::{
     state::state::FreelyMutableState,
     window::{CursorGrabMode, PrimaryWindow},
 };
+use ulid::{Generator, Ulid};
+
+#[derive(Resource)]
+pub struct IdGen(ulid::Generator);
+
+impl Default for IdGen {
+    fn default() -> Self {
+        IdGen(ulid::Generator::new())
+    }
+}
+
+impl IdGen {
+    pub fn generate(&mut self) -> Ulid {
+        self.0.generate().unwrap()
+    }
+}
 
 pub fn enter_state<S: FreelyMutableState>(new_state: S) -> impl Fn(ResMut<NextState<S>>) {
     move |mut next_state| next_state.set(new_state.clone())

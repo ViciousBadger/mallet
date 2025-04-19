@@ -1,8 +1,10 @@
+mod action;
 mod camera;
 mod map;
 mod selection;
 mod util;
 
+use action::EditorAction;
 use bevy::{
     app::AppExit,
     asset::RenderAssetUsages,
@@ -28,7 +30,7 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     App::new()
-        .add_plugins((DefaultPlugins, selection::plugin))
+        .add_plugins((DefaultPlugins, selection::plugin, action::plugin))
         .init_state::<EditorState>()
         // Only update when there is user input. Should be disabled when in-game
         //.insert_resource(WinitSettings::desktop_app())
@@ -39,7 +41,8 @@ fn main() -> Result<()> {
                 //swap_editor_state.run_if(input_just_pressed(MouseButton::Right)),
                 enter_state(EditorState::Fly).run_if(input_just_pressed(MouseButton::Right)),
                 enter_state(EditorState::Select).run_if(input_just_released(MouseButton::Right)),
-                exit_app.run_if(input_just_pressed(KeyCode::Escape)),
+                exit_app
+                    .run_if(in_state(EditorAction::None).and(input_just_pressed(KeyCode::Escape))),
                 freelook_input,
                 gimbal_mouse_rotation.run_if(in_state(EditorState::Fly)),
             ),
