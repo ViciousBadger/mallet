@@ -78,9 +78,15 @@ pub fn plugin(app: &mut App) {
                 switch_sel_axis(SelAxis::X).run_if(input_just_pressed(KeyCode::KeyX)),
                 switch_sel_axis(SelAxis::Z).run_if(input_just_pressed(KeyCode::KeyZ)),
                 switch_sel_axis(SelAxis::Y).run_if(input_just_pressed(KeyCode::KeyC)),
-                toggle_snap.run_if(input_just_pressed(KeyCode::KeyT)),
-                toggle_snap.run_if(input_just_pressed(KeyCode::AltLeft)),
-                toggle_snap.run_if(input_just_released(KeyCode::AltLeft)),
+                toggle_snap.run_if(
+                    input_just_pressed(KeyCode::KeyT)
+                        .or(input_just_pressed(KeyCode::AltLeft))
+                        .or(input_just_released(KeyCode::AltLeft)),
+                ),
+                toggle_move_axis_offset.run_if(
+                    input_just_pressed(MouseButton::Middle)
+                        .or(input_just_released(MouseButton::Middle)),
+                ),
             ),
         )
         // .add_systems(Update, reposition_sel_grid.run_if(on_event::<SelChanged>))
@@ -133,6 +139,17 @@ fn switch_sel_axis(
             sel_changed.send(SelChanged);
         }
     }
+}
+
+fn toggle_move_axis_offset(
+    current_sel_mode: Res<State<SelMode>>,
+    mut next_sel_mode: ResMut<NextState<SelMode>>,
+) {
+    next_sel_mode.set(if current_sel_mode.get() == &SelMode::MoveAxisOffset {
+        SelMode::Normal
+    } else {
+        SelMode::MoveAxisOffset
+    });
 }
 
 fn toggle_snap(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChanged>) {
