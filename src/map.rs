@@ -1,47 +1,39 @@
-use bevy::math::Vec3;
+pub mod brush;
+
+use bevy::{
+    color::palettes::css,
+    input::common_conditions::{input_just_pressed, input_just_released},
+    prelude::*,
+    utils::HashMap,
+};
+use brush::Brush;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::BTreeMap,
     hash::{Hash, Hasher},
 };
 use ulid::Ulid;
 
 use crate::util::IdGen;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default, Resource)]
 pub struct Map {
-    pub nodes: BTreeSet<MapNode>,
+    pub nodes: BTreeMap<Ulid, MapNode>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
 pub struct MapNode {
     pub id: Ulid,
     pub name: String,
     pub kind: MapNodeKind,
 }
 
+#[derive(Resource, Default)]
+pub struct MapNodeLookupTable(HashMap<Ulid, Entity>);
+
 impl Hash for MapNode {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.id.hash(state);
-    }
-}
-
-impl Eq for MapNode {}
-impl PartialEq for MapNode {
-    fn eq(&self, other: &Self) -> bool {
-        self.id.eq(&other.id)
-    }
-}
-
-impl Ord for MapNode {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.id.cmp(&other.id)
-    }
-}
-
-impl PartialOrd for MapNode {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
     }
 }
 
@@ -53,7 +45,7 @@ impl MapNode {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum MapNodeKind {
     Brush(Brush),
 }
@@ -66,8 +58,126 @@ impl MapNodeKind {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Brush {
-    pub start: Vec3,
-    pub end: Vec3,
+#[derive(Event)]
+pub struct CreateNewMapNode(pub MapNodeKind);
+
+#[derive(Event)]
+pub struct DeployMapNode(Entity);
+
+pub fn plugin(app: &mut App) {
+    app.add_systems(
+        First,
+        (
+            init_map.run_if(resource_added::<Map>),
+            cleanup_map.run_if(resource_removed::<Map>),
+            (reflect_map_node_changes, despawn_deleted_nodes)
+                .run_if(resource_exists_and_changed::<Map>),
+            reset_map.run_if(input_just_released(KeyCode::KeyR)),
+        ),
+    )
+    .add_systems(PreUpdate, perform_node_deployment)
+    .add_systems(Last, create_new_map_nodes)
+    .add_event::<CreateNewMapNode>()
+    .add_event::<DeployMapNode>()
+    .init_resource::<Map>()
+    .init_resource::<MapNodeLookupTable>();
+}
+
+fn reset_map(mut commands: Commands) {
+    commands.remove_resource::<Map>();
+    commands.init_resource::<Map>();
+}
+
+fn init_map(_map: Res<Map>) {
+    // things such as skybox color..?
+    info!("a map was added (init)");
+}
+
+fn cleanup_map() {
+    info!("a map was removed and cleaned");
+}
+
+fn create_new_map_nodes(
+    mut id_gen: ResMut<IdGen>,
+    mut create_node_events: EventReader<CreateNewMapNode>,
+    mut map: ResMut<Map>,
+) {
+    for event in create_node_events.read() {
+        info!("creating map node");
+        let new_node = MapNode::new(&mut id_gen, event.0.clone());
+        map.nodes.insert(new_node.id.clone(), new_node);
+    }
+}
+
+fn reflect_map_node_changes(
+    map: Res<Map>,
+    mut map_node_lookup: ResMut<MapNodeLookupTable>,
+    mut q_live_nodes: Query<&mut MapNode>,
+    mut commands: Commands,
+    mut deploy_events: EventWriter<DeployMapNode>,
+) {
+    info!("a map was added or changed");
+    for node in map.nodes.values() {
+        if let Some(entity) = map_node_lookup.0.get(&node.id) {
+            let mut live_node = q_live_nodes.get_mut(*entity).unwrap();
+            if &*live_node != node {
+                info!("node changed, to be redeployed: {}", node.id);
+                *live_node = node.clone();
+                deploy_events.send(DeployMapNode(*entity));
+            }
+        } else {
+            let node_entity = commands.spawn(node.clone()).id();
+            map_node_lookup.0.insert(node.id.clone(), node_entity);
+            deploy_events.send(DeployMapNode(node_entity));
+            info!("new node added, to be deployed: {}", node.id);
+        }
+    }
+}
+
+fn perform_node_deployment(
+    q_live_nodes: Query<&MapNode>,
+    mut deploy_events: EventReader<DeployMapNode>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for event in deploy_events.read() {
+        let node_entity_id = event.0;
+
+        let live_node = q_live_nodes.get(node_entity_id).unwrap();
+        info!("deployment of {}", live_node.id);
+
+        let mut entity_commands = commands.entity(node_entity_id);
+        entity_commands.despawn_descendants();
+
+        match &live_node.kind {
+            MapNodeKind::Brush(ref brush) => {
+                // Brush will use base entity as a container for sides.
+                entity_commands.insert((Transform::IDENTITY, Visibility::Visible));
+                for side in brush.bounds.sides() {
+                    commands
+                        .spawn((
+                            Transform::IDENTITY.with_translation(side.pos),
+                            Mesh3d(meshes.add(side.plane.mesh())),
+                            MeshMaterial3d(materials.add(Color::Srgba(css::PERU))),
+                        ))
+                        .set_parent(node_entity_id);
+                }
+            }
+        }
+    }
+}
+
+fn despawn_deleted_nodes(
+    map: Res<Map>,
+    mut map_node_lookup: ResMut<MapNodeLookupTable>,
+    q_live_nodes: Query<(Entity, &MapNode)>,
+    mut commands: Commands,
+) {
+    for (entity, live_node) in q_live_nodes.iter() {
+        if !map.nodes.contains_key(&live_node.id) {
+            commands.entity(entity).despawn_recursive();
+            map_node_lookup.0.remove(&live_node.id);
+        }
+    }
 }

@@ -17,7 +17,7 @@ use camera::{
     redraw_window_on_velocity, Freelook,
 };
 use color_eyre::eyre::Result;
-use util::{enter_state, grab_mouse, release_mouse};
+use util::{enter_state, grab_mouse, release_mouse, IdGen};
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 enum EditorState {
@@ -30,7 +30,12 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     App::new()
-        .add_plugins((DefaultPlugins, selection::plugin, action::plugin))
+        .add_plugins((
+            DefaultPlugins,
+            selection::plugin,
+            action::plugin,
+            map::plugin,
+        ))
         .init_state::<EditorState>()
         // Only update when there is user input. Should be disabled when in-game
         //.insert_resource(WinitSettings::desktop_app())
@@ -53,6 +58,7 @@ fn main() -> Result<()> {
             OnExit(EditorState::Fly),
             (release_mouse, freelook_input_reset),
         )
+        .init_resource::<IdGen>()
         .run();
 
     Ok(())
