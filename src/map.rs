@@ -1,22 +1,22 @@
 pub mod brush;
 
 use bevy::{
-    color::palettes::css,
-    input::common_conditions::{input_just_pressed, input_just_released},
-    prelude::*,
-    utils::HashMap,
+    color::palettes::css, input::common_conditions::input_just_released, prelude::*, utils::HashMap,
 };
+use bevy_common_assets::ron::RonAssetPlugin;
 use brush::Brush;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
+    fs::File,
     hash::{Hash, Hasher},
+    io::Write,
 };
 use ulid::Ulid;
 
 use crate::util::IdGen;
 
-#[derive(Serialize, Deserialize, Default, Resource)]
+#[derive(Serialize, Deserialize, Default, Resource, Asset, TypePath)]
 pub struct Map {
     pub nodes: BTreeMap<Ulid, MapNode>,
 }
@@ -65,22 +65,65 @@ pub struct CreateNewMapNode(pub MapNodeKind);
 pub struct DeployMapNode(Entity);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(
-        First,
-        (
-            init_map.run_if(resource_added::<Map>),
-            cleanup_map.run_if(resource_removed::<Map>),
-            (reflect_map_node_changes, despawn_deleted_nodes)
-                .run_if(resource_exists_and_changed::<Map>),
-            reset_map.run_if(input_just_released(KeyCode::KeyR)),
-        ),
-    )
-    .add_systems(PreUpdate, perform_node_deployment)
-    .add_systems(Last, create_new_map_nodes)
-    .add_event::<CreateNewMapNode>()
-    .add_event::<DeployMapNode>()
-    .init_resource::<Map>()
-    .init_resource::<MapNodeLookupTable>();
+    app.add_plugins(RonAssetPlugin::<Map>::new(&["mmap"]))
+        .add_systems(Startup, start_loading_map)
+        .add_systems(
+            First,
+            (
+                init_map.run_if(resource_added::<Map>),
+                cleanup_map.run_if(resource_removed::<Map>),
+                (reflect_map_node_changes, despawn_deleted_nodes)
+                    .run_if(resource_exists_and_changed::<Map>),
+                reset_map.run_if(input_just_released(KeyCode::KeyR)),
+            ),
+        )
+        .add_systems(PreUpdate, perform_node_deployment)
+        .add_systems(PostUpdate, save_map.run_if(on_event::<AppExit>))
+        .add_systems(
+            Last,
+            (
+                create_new_map_nodes,
+                wait_for_map_load.run_if(resource_exists::<LoadingMap>),
+            ),
+        )
+        .add_event::<CreateNewMapNode>()
+        .add_event::<DeployMapNode>()
+        .init_resource::<Map>()
+        .init_resource::<MapNodeLookupTable>();
+}
+
+#[derive(Resource)]
+pub struct LoadingMap(Handle<Map>);
+
+fn start_loading_map(asset_server: Res<AssetServer>, mut commands: Commands) {
+    let handle = asset_server.load("map.mmap");
+    commands.insert_resource(LoadingMap(handle));
+}
+
+fn wait_for_map_load(
+    loading_map: Res<LoadingMap>,
+    asset_server: Res<AssetServer>,
+    mut map_assets: ResMut<Assets<Map>>,
+    mut commands: Commands,
+) {
+    match asset_server.load_state(&loading_map.0) {
+        bevy::asset::LoadState::Loaded => {
+            commands.insert_resource(map_assets.remove(&loading_map.0).unwrap());
+            commands.remove_resource::<LoadingMap>();
+            info!("load map success");
+        }
+        bevy::asset::LoadState::Failed(asset_load_error) => {
+            commands.remove_resource::<LoadingMap>();
+            info!("failed to load map: {}", asset_load_error);
+        }
+        _ => {}
+    };
+}
+
+fn save_map(map: Res<Map>) {
+    let mut file = File::create("assets/map.mmap").unwrap();
+    file.write_all(ron::ser::to_string(&*map).unwrap().as_bytes())
+        .unwrap();
 }
 
 fn reset_map(mut commands: Commands) {
