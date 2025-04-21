@@ -1,57 +1,52 @@
 pub mod brush;
 
+use crate::{app_data::AppDataPath, util::IdGen};
 use bevy::{
     color::palettes::css,
     input::common_conditions::input_just_released,
-    log::tracing_subscriber::fmt::MakeWriter,
     prelude::*,
-    tasks::{
-        block_on,
-        futures_lite::{future, FutureExt},
-        AsyncComputeTaskPool, Task,
-    },
-    utils::HashMap,
+    tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
+    utils::{HashMap, HashSet},
 };
 use brush::Brush;
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    fs::File,
-    hash::{Hash, Hasher},
-    io::Write,
-    path::PathBuf,
-};
-use ulid::Ulid;
+use rand::{Rng, RngCore, SeedableRng};
+use serde::{de::value::U64Deserializer, Deserialize, Serialize};
+use std::{fs::File, path::PathBuf};
+use ulid::{serde::ulid_as_u128, Ulid};
+use wyrand::WyRand;
 
-use crate::{app_data::AppDataPath, util::IdGen};
+#[derive(Serialize, Deserialize, Default)]
+pub struct StoredGameMap {
+    pub nodes: Vec<MapNode>,
+}
 
-#[derive(Serialize, Deserialize, Default, Resource)]
-pub struct Map {
-    pub nodes: BTreeMap<Ulid, MapNode>,
+#[derive(Resource)]
+pub struct LiveGameMap {
+    pub save_path: PathBuf,
+    pub node_lookup_table: HashMap<Ulid, Entity>,
+}
+
+impl LiveGameMap {
+    pub fn new(save_path: PathBuf) -> Self {
+        Self {
+            save_path,
+            node_lookup_table: default(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
 pub struct MapNode {
+    #[serde(with = "ulid_as_u128")]
     pub id: Ulid,
     pub name: String,
     pub kind: MapNodeKind,
 }
 
-#[derive(Resource, Default)]
-pub struct MapNodeLookupTable(HashMap<Ulid, Entity>);
-
-impl Hash for MapNode {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-impl MapNode {
-    pub fn new(id_gen: &mut IdGen, kind: MapNodeKind) -> Self {
-        let id = id_gen.generate();
-        let name = format!("data://maps/{}-{}", id, kind.name());
-        Self { id, name, kind }
-    }
+#[derive(Resource)]
+struct LoadingMap {
+    path: PathBuf,
+    task: Task<StoredGameMap>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -82,119 +77,129 @@ pub fn default_map_filename() -> String {
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, start_loading_map)
+        .add_systems(Startup, init_empty_map)
         .add_systems(
             First,
-            (
-                init_map.run_if(resource_added::<Map>),
-                cleanup_map.run_if(resource_removed::<Map>),
-                (reflect_map_node_changes, despawn_deleted_nodes)
-                    .run_if(resource_exists_and_changed::<Map>),
-                reset_map.run_if(input_just_released(KeyCode::KeyR)),
-            ),
+            (unload_map, init_empty_map).run_if(input_just_released(KeyCode::KeyR)),
         )
-        .add_systems(PreUpdate, perform_node_deployment)
-        .add_systems(PostUpdate, save_map.run_if(on_event::<AppExit>))
+        .add_systems(PreUpdate, deploy_nodes)
+        .add_systems(
+            PostUpdate,
+            save_map.run_if(resource_exists::<LiveGameMap>.and(on_event::<AppExit>)),
+        )
         .add_systems(
             Last,
             (
-                create_new_map_nodes,
                 insert_map_when_loaded.run_if(resource_exists::<LoadingMap>),
+                (
+                    create_new_map_nodes,
+                    remove_despawned_entites_from_lookup_table,
+                )
+                    .run_if(resource_exists::<LiveGameMap>),
             ),
         )
         .add_event::<CreateNewMapNode>()
-        .add_event::<DeployMapNode>()
-        .init_resource::<Map>()
-        .init_resource::<MapNodeLookupTable>();
-}
-
-#[derive(Resource)]
-struct LoadingMap {
-    task: Task<Map>,
+        .add_event::<DeployMapNode>();
 }
 
 fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
     let path: PathBuf = [data_path.get(), &default_map_filename()].iter().collect();
     if path.exists() {
+        let task_owned_path = path.clone();
         let task = async move {
-            let bytes = std::fs::read(path).unwrap();
-            let map: Map = postcard::from_bytes(&bytes).unwrap();
+            let bytes = std::fs::read(task_owned_path).unwrap();
+            let map: StoredGameMap = postcard::from_bytes(&bytes).unwrap();
             map
         };
         let task_pool = AsyncComputeTaskPool::get();
         commands.insert_resource(LoadingMap {
+            path,
             task: task_pool.spawn(task),
         });
     } else {
-        info!("no map file found at {}", path.display());
+        info!(
+            "no map file found at {}. inserting empty map",
+            path.display()
+        );
+        commands.insert_resource(LiveGameMap::new(path.clone()));
     }
 }
 
-fn insert_map_when_loaded(mut loading_map: ResMut<LoadingMap>, mut commands: Commands) {
+fn insert_map_when_loaded(
+    mut loading_map: ResMut<LoadingMap>,
+    mut commands: Commands,
+    mut deploy_events: EventWriter<DeployMapNode>,
+) {
     if let Some(map) = block_on(future::poll_once(&mut loading_map.task)) {
         commands.remove_resource::<LoadingMap>();
-        commands.insert_resource(map);
+        let mut live_map = LiveGameMap::new(loading_map.path.clone());
+        for node in map.nodes {
+            let node_id = node.id.clone();
+            let entity = commands.spawn(node).id();
+            deploy_events.send(DeployMapNode(entity));
+            live_map.node_lookup_table.insert(node_id, entity);
+        }
+        commands.insert_resource(live_map);
     }
 }
 
-fn save_map(data_path: Res<AppDataPath>, map: Res<Map>) {
+fn save_map(map: Res<LiveGameMap>, q_live_nodes: Query<&MapNode>) {
     // TODO: async, of course this would mean it can't run on AppExit.
-    let path: PathBuf = [data_path.get(), &default_map_filename()].iter().collect();
-    let file = File::create(path).unwrap();
-    postcard::to_io(&*map, file).unwrap();
+    let file = File::create(&map.save_path).unwrap();
+
+    let stored_map = StoredGameMap {
+        nodes: q_live_nodes.iter().cloned().collect(),
+    };
+    postcard::to_io(&stored_map, file).unwrap();
 }
 
-fn reset_map(mut commands: Commands) {
-    commands.remove_resource::<Map>();
-    commands.init_resource::<Map>();
+fn unload_map(q_live_nodes: Query<Entity, With<MapNode>>, mut commands: Commands) {
+    info!("unload map with {} nodes", q_live_nodes.iter().count());
+    for entity in q_live_nodes.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+    commands.remove_resource::<LiveGameMap>();
 }
 
-fn init_map(_map: Res<Map>) {
-    // things such as skybox color..?
-    info!("a map was added (init)");
-}
-
-fn cleanup_map() {
-    info!("a map was removed and cleaned");
+fn init_empty_map(data_path: Res<AppDataPath>, mut commands: Commands) {
+    commands.insert_resource(LiveGameMap::new(
+        [data_path.get(), &default_map_filename()].iter().collect(),
+    ));
 }
 
 fn create_new_map_nodes(
     mut id_gen: ResMut<IdGen>,
     mut create_node_events: EventReader<CreateNewMapNode>,
-    mut map: ResMut<Map>,
+    mut map: ResMut<LiveGameMap>,
+    mut deploy_events: EventWriter<DeployMapNode>,
+    mut commands: Commands,
 ) {
     for event in create_node_events.read() {
         info!("creating map node");
-        let new_node = MapNode::new(&mut id_gen, event.0.clone());
-        map.nodes.insert(new_node.id.clone(), new_node);
+
+        let id = id_gen.generate();
+        let kind = event.0.clone();
+        let name = kind.name().to_string();
+
+        let entity = commands.spawn(MapNode { id, name, kind }).id();
+        map.node_lookup_table.insert(id, entity);
+        deploy_events.send(DeployMapNode(entity));
+        //let new_node = MapNode { id, name, kind };
+        //map.nodes.insert(new_node.id.clone(), new_node);
     }
 }
 
-fn reflect_map_node_changes(
-    map: Res<Map>,
-    mut map_node_lookup: ResMut<MapNodeLookupTable>,
-    mut q_live_nodes: Query<&mut MapNode>,
-    mut commands: Commands,
-    mut deploy_events: EventWriter<DeployMapNode>,
+fn remove_despawned_entites_from_lookup_table(
+    mut removals: RemovedComponents<MapNode>,
+    mut live_map: ResMut<LiveGameMap>,
 ) {
-    info!("a map was added or changed");
-    for node in map.nodes.values() {
-        if let Some(entity) = map_node_lookup.0.get(&node.id) {
-            let mut live_node = q_live_nodes.get_mut(*entity).unwrap();
-            if &*live_node != node {
-                info!("node changed, to be redeployed: {}", node.id);
-                *live_node = node.clone();
-                deploy_events.send(DeployMapNode(*entity));
-            }
-        } else {
-            let node_entity = commands.spawn(node.clone()).id();
-            map_node_lookup.0.insert(node.id.clone(), node_entity);
-            deploy_events.send(DeployMapNode(node_entity));
-            info!("new node added, to be deployed: {}", node.id);
-        }
-    }
+    let removed_entities: HashSet<Entity> = removals.read().collect();
+    live_map
+        .node_lookup_table
+        .retain(|_, v| !removed_entities.contains(v));
 }
 
-fn perform_node_deployment(
+fn deploy_nodes(
     q_live_nodes: Query<&MapNode>,
     mut deploy_events: EventReader<DeployMapNode>,
     mut commands: Commands,
@@ -208,36 +213,31 @@ fn perform_node_deployment(
         info!("deployment of {}", live_node.id);
 
         let mut entity_commands = commands.entity(node_entity_id);
+        entity_commands.retain::<MapNode>();
         entity_commands.despawn_descendants();
 
         match &live_node.kind {
             MapNodeKind::Brush(ref brush) => {
                 // Brush will use base entity as a container for sides.
                 entity_commands.insert((Transform::IDENTITY, Visibility::Visible));
+
+                let mut rng = WyRand::new(live_node.id.0 as u64);
+                let color = rng.next_u32();
+                let r = (color & 0xFF) as u8;
+                let g = ((color >> 8) & 0xFF) as u8;
+                let b = ((color >> 16) & 0xFF) as u8;
+                let color = Color::srgb_u8(r, g, b);
+
                 for side in brush.bounds.sides() {
                     commands
                         .spawn((
                             Transform::IDENTITY.with_translation(side.pos),
                             Mesh3d(meshes.add(side.plane.mesh())),
-                            MeshMaterial3d(materials.add(Color::Srgba(css::PERU))),
+                            MeshMaterial3d(materials.add(color)),
                         ))
                         .set_parent(node_entity_id);
                 }
             }
-        }
-    }
-}
-
-fn despawn_deleted_nodes(
-    map: Res<Map>,
-    mut map_node_lookup: ResMut<MapNodeLookupTable>,
-    q_live_nodes: Query<(Entity, &MapNode)>,
-    mut commands: Commands,
-) {
-    for (entity, live_node) in q_live_nodes.iter() {
-        if !map.nodes.contains_key(&live_node.id) {
-            commands.entity(entity).despawn_recursive();
-            map_node_lookup.0.remove(&live_node.id);
         }
     }
 }
