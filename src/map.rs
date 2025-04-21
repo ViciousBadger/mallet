@@ -1,9 +1,17 @@
 pub mod brush;
 
 use bevy::{
-    color::palettes::css, input::common_conditions::input_just_released, prelude::*, utils::HashMap,
+    color::palettes::css,
+    input::common_conditions::input_just_released,
+    log::tracing_subscriber::fmt::MakeWriter,
+    prelude::*,
+    tasks::{
+        block_on,
+        futures_lite::{future, FutureExt},
+        AsyncComputeTaskPool, Task,
+    },
+    utils::HashMap,
 };
-use bevy_common_assets::ron::RonAssetPlugin;
 use brush::Brush;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -11,12 +19,13 @@ use std::{
     fs::File,
     hash::{Hash, Hasher},
     io::Write,
+    path::PathBuf,
 };
 use ulid::Ulid;
 
-use crate::util::IdGen;
+use crate::{app_data::AppDataPath, util::IdGen};
 
-#[derive(Serialize, Deserialize, Default, Resource, Asset, TypePath)]
+#[derive(Serialize, Deserialize, Default, Resource)]
 pub struct Map {
     pub nodes: BTreeMap<Ulid, MapNode>,
 }
@@ -40,7 +49,7 @@ impl Hash for MapNode {
 impl MapNode {
     pub fn new(id_gen: &mut IdGen, kind: MapNodeKind) -> Self {
         let id = id_gen.generate();
-        let name = format!("{}-{}", id, kind.name());
+        let name = format!("data://maps/{}-{}", id, kind.name());
         Self { id, name, kind }
     }
 }
@@ -64,9 +73,15 @@ pub struct CreateNewMapNode(pub MapNodeKind);
 #[derive(Event)]
 pub struct DeployMapNode(Entity);
 
+pub const MAP_FILE_EXT: &'static str = "mmap";
+pub const DEFAULT_MAP_NAME: &'static str = "map";
+
+pub fn default_map_filename() -> String {
+    format!("{}.{}", DEFAULT_MAP_NAME, MAP_FILE_EXT)
+}
+
 pub fn plugin(app: &mut App) {
-    app.add_plugins(RonAssetPlugin::<Map>::new(&["mmap"]))
-        .add_systems(Startup, start_loading_map)
+    app.add_systems(Startup, start_loading_map)
         .add_systems(
             First,
             (
@@ -83,7 +98,7 @@ pub fn plugin(app: &mut App) {
             Last,
             (
                 create_new_map_nodes,
-                wait_for_map_load.run_if(resource_exists::<LoadingMap>),
+                insert_map_when_loaded.run_if(resource_exists::<LoadingMap>),
             ),
         )
         .add_event::<CreateNewMapNode>()
@@ -93,37 +108,39 @@ pub fn plugin(app: &mut App) {
 }
 
 #[derive(Resource)]
-pub struct LoadingMap(Handle<Map>);
-
-fn start_loading_map(asset_server: Res<AssetServer>, mut commands: Commands) {
-    let handle = asset_server.load("map.mmap");
-    commands.insert_resource(LoadingMap(handle));
+struct LoadingMap {
+    task: Task<Map>,
 }
 
-fn wait_for_map_load(
-    loading_map: Res<LoadingMap>,
-    asset_server: Res<AssetServer>,
-    mut map_assets: ResMut<Assets<Map>>,
-    mut commands: Commands,
-) {
-    match asset_server.load_state(&loading_map.0) {
-        bevy::asset::LoadState::Loaded => {
-            commands.insert_resource(map_assets.remove(&loading_map.0).unwrap());
-            commands.remove_resource::<LoadingMap>();
-            info!("load map success");
-        }
-        bevy::asset::LoadState::Failed(asset_load_error) => {
-            commands.remove_resource::<LoadingMap>();
-            info!("failed to load map: {}", asset_load_error);
-        }
-        _ => {}
-    };
+fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
+    let path: PathBuf = [data_path.get(), &default_map_filename()].iter().collect();
+    if path.exists() {
+        let task = async move {
+            let bytes = std::fs::read(path).unwrap();
+            let map: Map = postcard::from_bytes(&bytes).unwrap();
+            map
+        };
+        let task_pool = AsyncComputeTaskPool::get();
+        commands.insert_resource(LoadingMap {
+            task: task_pool.spawn(task),
+        });
+    } else {
+        info!("no map file found at {}", path.display());
+    }
 }
 
-fn save_map(map: Res<Map>) {
-    let mut file = File::create("assets/map.mmap").unwrap();
-    file.write_all(ron::ser::to_string(&*map).unwrap().as_bytes())
-        .unwrap();
+fn insert_map_when_loaded(mut loading_map: ResMut<LoadingMap>, mut commands: Commands) {
+    if let Some(map) = block_on(future::poll_once(&mut loading_map.task)) {
+        commands.remove_resource::<LoadingMap>();
+        commands.insert_resource(map);
+    }
+}
+
+fn save_map(data_path: Res<AppDataPath>, map: Res<Map>) {
+    // TODO: async, of course this would mean it can't run on AppExit.
+    let path: PathBuf = [data_path.get(), &default_map_filename()].iter().collect();
+    let file = File::create(path).unwrap();
+    postcard::to_io(&*map, file).unwrap();
 }
 
 fn reset_map(mut commands: Commands) {

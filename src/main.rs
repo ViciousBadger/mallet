@@ -1,4 +1,5 @@
 mod action;
+mod app_data;
 mod camera;
 mod map;
 mod selection;
@@ -7,7 +8,7 @@ mod util;
 use action::EditorAction;
 use bevy::{
     app::AppExit,
-    asset::RenderAssetUsages,
+    asset::{io::AssetSourceBuilder, RenderAssetUsages},
     input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
     winit::WinitSettings,
@@ -31,6 +32,7 @@ fn main() -> Result<()> {
 
     App::new()
         .add_plugins((
+            app_data::plugin,
             DefaultPlugins,
             selection::plugin,
             action::plugin,
