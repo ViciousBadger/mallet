@@ -1,6 +1,7 @@
 mod action;
 mod app_data;
 mod camera;
+mod keybinds;
 mod map;
 mod selection;
 mod util;
@@ -18,6 +19,7 @@ use camera::{
     redraw_window_on_velocity, Freelook,
 };
 use color_eyre::eyre::Result;
+use keybinds::KeyBind;
 use util::{enter_state, grab_mouse, release_mouse, IdGen};
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
@@ -37,6 +39,7 @@ fn main() -> Result<()> {
             selection::plugin,
             action::plugin,
             map::plugin,
+            keybinds::plugin,
         ))
         .init_state::<EditorState>()
         // Only update when there is user input. Should be disabled when in-game
@@ -46,10 +49,9 @@ fn main() -> Result<()> {
             PreUpdate,
             (
                 //swap_editor_state.run_if(input_just_pressed(MouseButton::Right)),
-                enter_state(EditorState::Fly).run_if(input_just_pressed(MouseButton::Right)),
-                enter_state(EditorState::Select).run_if(input_just_released(MouseButton::Right)),
-                exit_app
-                    .run_if(in_state(EditorAction::None).and(input_just_pressed(KeyCode::Escape))),
+                enter_state(EditorState::Fly).run_if(input_just_pressed(KeyBind::FlyMode)),
+                enter_state(EditorState::Select).run_if(input_just_released(KeyBind::FlyMode)),
+                exit_app.run_if(input_just_pressed(KeyBind::Quit)),
                 freelook_input,
                 gimbal_mouse_rotation.run_if(in_state(EditorState::Fly)),
             ),

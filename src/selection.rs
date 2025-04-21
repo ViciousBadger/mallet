@@ -8,7 +8,12 @@ use bevy::{
     window::PrimaryWindow,
 };
 
-#[derive(Default, Clone, PartialEq, Eq)]
+use crate::{
+    keybinds::{self, KeyBind},
+    util::input_just_toggled,
+};
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SelAxis {
     X,
     #[default]
@@ -60,32 +65,80 @@ pub struct SelChanged;
 pub enum SelMode {
     #[default]
     Normal,
-    // i guess this should be more complex than a state, its one of those actions you want to be
-    // able to press escape to cancel, like in blender.
-    MoveAxisOffset,
+    AxisLocked(SelAxis),
+}
+
+impl SelMode {
+    pub fn is_axis_locked(&self) -> bool {
+        match self {
+            SelMode::Normal => false,
+            SelMode::AxisLocked(_) => true,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct SelIsAxisLocked;
+impl ComputedStates for SelIsAxisLocked {
+    type SourceStates = SelMode;
+
+    fn compute(sources: Self::SourceStates) -> Option<Self> {
+        sources.is_axis_locked().then(|| SelIsAxisLocked)
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct LockedAxis(SelAxis);
+impl ComputedStates for LockedAxis {
+    type SourceStates = SelMode;
+
+    fn compute(sources: Self::SourceStates) -> Option<Self> {
+        match sources {
+            SelMode::Normal => None,
+            SelMode::AxisLocked(sel_axis) => Some(LockedAxis(sel_axis.clone())),
+        }
+    }
+}
+
+impl LockedAxis {
+    pub fn get_axis(&self) -> &SelAxis {
+        &self.0
+    }
 }
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<Sel>()
         .add_event::<SelChanged>()
         .init_state::<SelMode>()
+        .add_computed_state::<SelIsAxisLocked>()
+        .add_computed_state::<LockedAxis>()
         .add_systems(
             PreUpdate,
             (
-                move_selected_pos.run_if(in_state(SelMode::Normal).and(on_event::<MouseMotion>)),
-                move_axis_offset
-                    .run_if(in_state(SelMode::MoveAxisOffset).and(on_event::<MouseMotion>)),
-                switch_sel_axis(SelAxis::X).run_if(input_just_pressed(KeyCode::KeyX)),
-                switch_sel_axis(SelAxis::Z).run_if(input_just_pressed(KeyCode::KeyZ)),
-                switch_sel_axis(SelAxis::Y).run_if(input_just_pressed(KeyCode::KeyC)),
-                toggle_snap.run_if(
-                    input_just_pressed(KeyCode::KeyT)
-                        .or(input_just_pressed(KeyCode::AltLeft))
-                        .or(input_just_released(KeyCode::AltLeft)),
+                select_normal.run_if(in_state(SelMode::Normal).and(on_event::<MouseMotion>)),
+                select_locked.run_if(in_state(SelIsAxisLocked).and(on_event::<MouseMotion>)),
+                reset_axis_offset.run_if(input_just_pressed(KeyBind::ResetSelAxisOffset)),
+                (
+                    switch_sel_axis(SelAxis::X).run_if(input_just_pressed(KeyBind::SetSelAxisX)),
+                    switch_sel_axis(SelAxis::Y).run_if(input_just_pressed(KeyBind::SetSelAxisY)),
+                    switch_sel_axis(SelAxis::Z).run_if(input_just_pressed(KeyBind::SetSelAxisZ)),
+                )
+                    .run_if(in_state(SelMode::Normal)),
+                set_axis_lock(SelAxis::X).run_if(input_just_pressed(KeyBind::AxisLockX)),
+                set_axis_lock(SelAxis::Y).run_if(input_just_pressed(KeyBind::AxisLockY)),
+                set_axis_lock(SelAxis::Z).run_if(input_just_pressed(KeyBind::AxisLockZ)),
+                reset_sel_mode.run_if(
+                    input_just_released(KeyBind::AxisLockX).or(input_just_released(
+                        KeyBind::AxisLockY,
+                    )
+                    .or(input_just_released(KeyBind::AxisLockZ)
+                        .or(input_just_released(KeyBind::AxisLockSelected)))),
                 ),
-                toggle_move_axis_offset.run_if(
-                    input_just_pressed(MouseButton::Middle)
-                        .or(input_just_released(MouseButton::Middle)),
+                set_axis_lock(SelAxis::Y).run_if(input_just_pressed(KeyBind::AxisLockY)),
+                set_axis_lock(SelAxis::Z).run_if(input_just_pressed(KeyBind::AxisLockZ)),
+                set_axis_lock_selected.run_if(input_just_pressed(KeyBind::AxisLockSelected)),
+                toggle_snap.run_if(
+                    input_just_pressed(KeyCode::KeyT).or(input_just_toggled(KeyCode::AltLeft)),
                 ),
             ),
         )
@@ -98,7 +151,7 @@ fn draw_sel_gizmos(sel: Res<Sel>, sel_mode: Res<State<SelMode>>, mut gizmos: Giz
 
     gizmos.grid(
         sel.as_isometry(),
-        UVec2::new(128, 128),
+        UVec2::new(SEL_DIST_LIMIT as u32 * 2, SEL_DIST_LIMIT as u32 * 2),
         Vec2::ONE,
         grid_line_color,
     );
@@ -108,48 +161,73 @@ fn draw_sel_gizmos(sel: Res<Sel>, sel_mode: Res<State<SelMode>>, mut gizmos: Giz
         .with_scale(Vec3::ONE * 0.1);
     gizmos.cuboid(sel_trans, css::INDIAN_RED);
 
-    if sel_mode.get() == &SelMode::MoveAxisOffset {
-        gizmos.line(
-            sel.position + sel.axis.as_unit_vec() * -100.0,
-            sel.position + sel.axis.as_unit_vec() * 100.0,
-            css::INDIAN_RED,
-        );
+    let sel_color = css::GOLD;
+
+    fn axis_line(gizmos: &mut Gizmos, pos: &Vec3, v: Vec3, color: impl Into<Color>) {
+        gizmos.line(pos - v * SEL_DIST_LIMIT, pos + v * SEL_DIST_LIMIT, color);
+    }
+
+    axis_line(
+        &mut gizmos,
+        &sel.position,
+        Vec3::X,
+        if *sel_mode == SelMode::AxisLocked(SelAxis::X) {
+            sel_color
+        } else {
+            css::BLUE_VIOLET.with_alpha(0.3)
+        },
+    );
+
+    axis_line(
+        &mut gizmos,
+        &sel.position,
+        Vec3::Y,
+        if *sel_mode == SelMode::AxisLocked(SelAxis::Y) {
+            sel_color
+        } else {
+            css::INDIAN_RED.with_alpha(0.3)
+        },
+    );
+
+    axis_line(
+        &mut gizmos,
+        &sel.position,
+        Vec3::Z,
+        if *sel_mode == SelMode::AxisLocked(SelAxis::Z) {
+            sel_color
+        } else {
+            css::SPRING_GREEN.with_alpha(0.3)
+        },
+    );
+}
+
+fn switch_sel_axis(new_axis: SelAxis) -> impl Fn(ResMut<Sel>) {
+    move |mut sel| {
+        sel.axis_offset = match new_axis {
+            SelAxis::X => sel.position.x,
+            SelAxis::Y => sel.position.y,
+            SelAxis::Z => sel.position.z,
+        };
+        sel.axis = new_axis.clone();
     }
 }
 
-fn switch_sel_axis(
-    new_axis: SelAxis,
-) -> impl Fn(ResMut<Sel>, Res<State<SelMode>>, ResMut<NextState<SelMode>>, EventWriter<SelChanged>)
-{
-    move |mut sel, current_sel_mode, mut next_sel_mode, mut sel_changed| {
-        if sel.axis == new_axis {
-            next_sel_mode.set(if current_sel_mode.get() == &SelMode::MoveAxisOffset {
-                SelMode::Normal
-            } else {
-                SelMode::MoveAxisOffset
-            });
+fn set_axis_lock(axis: SelAxis) -> impl Fn(Res<State<SelMode>>, ResMut<NextState<SelMode>>) {
+    move |cur_sel_mode, mut next_sel_mode| {
+        if cur_sel_mode.get() != &SelMode::AxisLocked(axis.clone()) {
+            next_sel_mode.set(SelMode::AxisLocked(axis.clone()));
         } else {
             next_sel_mode.set(SelMode::Normal);
-            sel.axis_offset = match new_axis {
-                SelAxis::X => sel.position.x,
-                SelAxis::Y => sel.position.y,
-                SelAxis::Z => sel.position.z,
-            };
-            sel.axis = new_axis.clone();
-            sel_changed.send(SelChanged);
         }
     }
 }
 
-fn toggle_move_axis_offset(
-    current_sel_mode: Res<State<SelMode>>,
-    mut next_sel_mode: ResMut<NextState<SelMode>>,
-) {
-    next_sel_mode.set(if current_sel_mode.get() == &SelMode::MoveAxisOffset {
-        SelMode::Normal
-    } else {
-        SelMode::MoveAxisOffset
-    });
+fn reset_sel_mode(mut next_sel_mode: ResMut<NextState<SelMode>>) {
+    next_sel_mode.set(SelMode::Normal)
+}
+
+fn set_axis_lock_selected(sel: Res<Sel>, mut next_sel_mode: ResMut<NextState<SelMode>>) {
+    next_sel_mode.set(SelMode::AxisLocked(sel.axis.clone()));
 }
 
 fn toggle_snap(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChanged>) {
@@ -159,7 +237,9 @@ fn toggle_snap(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChanged>) {
     // when snap is disabled.
 }
 
-fn move_selected_pos(
+const SEL_DIST_LIMIT: f32 = 64.0;
+
+fn select_normal(
     q_window: Query<&Window, With<PrimaryWindow>>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
     mut sel: ResMut<Sel>,
@@ -175,26 +255,30 @@ fn move_selected_pos(
             if let Some(dist) = ray.intersect_plane(sel.grid_center(), plane) {
                 let point = ray.get_point(dist);
                 let point = if sel.snap { Vec3::round(point) } else { point };
+                let point = point.clamp(Vec3::NEG_ONE * SEL_DIST_LIMIT, Vec3::ONE * SEL_DIST_LIMIT);
                 sel.position = point;
             }
         }
     }
 }
 
-fn move_axis_offset(
+fn select_locked(
     q_window: Query<&Window, With<PrimaryWindow>>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
+    locked_axis: Res<State<LockedAxis>>,
     mut sel: ResMut<Sel>,
     mut sel_changed: EventWriter<SelChanged>,
 ) {
     let window = q_window.single();
+
+    let axis = locked_axis.get_axis();
 
     if let Some(mouse_pos) = window.cursor_position() {
         let (cam, cam_trans) = q_camera.single();
 
         if let Ok(ray) = cam.viewport_to_world(cam_trans, mouse_pos) {
             let mut towards_cam = sel.position - cam_trans.translation();
-            match sel.axis {
+            match axis {
                 SelAxis::X => towards_cam.x = 0.0,
                 SelAxis::Y => towards_cam.y = 0.0,
                 SelAxis::Z => towards_cam.z = 0.0,
@@ -206,22 +290,41 @@ fn move_axis_offset(
                 let point = ray.get_point(dist);
                 let point = if sel.snap { Vec3::round(point) } else { point };
 
-                match sel.axis {
+                match axis {
                     SelAxis::X => {
-                        sel.axis_offset = point.x;
-                        sel.position.x = point.x;
+                        let target_x = point.x.clamp(-SEL_DIST_LIMIT, SEL_DIST_LIMIT);
+                        if axis == &sel.axis {
+                            sel.axis_offset = target_x
+                        };
+                        sel.position.x = target_x;
                     }
                     SelAxis::Y => {
-                        sel.axis_offset = point.y;
-                        sel.position.y = point.y;
+                        let target_y = point.y.clamp(-SEL_DIST_LIMIT, SEL_DIST_LIMIT);
+                        if axis == &sel.axis {
+                            sel.axis_offset = target_y;
+                        };
+                        sel.position.y = target_y;
                     }
                     SelAxis::Z => {
-                        sel.axis_offset = point.z;
-                        sel.position.z = point.z;
+                        let target_z = point.z.clamp(-SEL_DIST_LIMIT, SEL_DIST_LIMIT);
+                        if axis == &sel.axis {
+                            sel.axis_offset = target_z;
+                        };
+                        sel.position.z = target_z;
                     }
                 }
                 sel_changed.send(SelChanged);
             }
         }
     }
+}
+
+fn reset_axis_offset(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChanged>) {
+    sel.axis_offset = 0.0;
+    match sel.axis {
+        SelAxis::X => sel.position.x = 0.0,
+        SelAxis::Y => sel.position.y = 0.0,
+        SelAxis::Z => sel.position.z = 0.0,
+    };
+    sel_changed.send(SelChanged);
 }

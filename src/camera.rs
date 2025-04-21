@@ -4,6 +4,8 @@ use bevy::{
     window::RequestRedraw,
 };
 
+use crate::keybinds::KeyBind;
+
 #[derive(Component, Default)]
 pub struct Gimbal {
     yaw_pitch: Vec2,
@@ -46,28 +48,28 @@ impl Default for Freelook {
 
 pub fn freelook_input(
     mut q_freelook: Query<&mut Freelook>,
-    keyboard: Res<ButtonInput<KeyCode>>,
+    keybinds: Res<ButtonInput<KeyBind>>,
     mut mouse_wheel: EventReader<MouseWheel>,
 ) {
     let mut freelook = q_freelook.single_mut();
     let mut raw_move = Vec3::ZERO;
 
-    if keyboard.pressed(KeyCode::KeyW) {
+    if keybinds.pressed(KeyBind::MoveForwards) {
         raw_move -= Vec3::Z
     }
-    if keyboard.pressed(KeyCode::KeyA) {
+    if keybinds.pressed(KeyBind::MoveLeft) {
         raw_move -= Vec3::X
     }
-    if keyboard.pressed(KeyCode::KeyS) {
+    if keybinds.pressed(KeyBind::MoveBackwards) {
         raw_move += Vec3::Z
     }
-    if keyboard.pressed(KeyCode::KeyD) {
+    if keybinds.pressed(KeyBind::MoveRight) {
         raw_move += Vec3::X
     }
-    if keyboard.pressed(KeyCode::ShiftLeft) {
+    if keybinds.pressed(KeyBind::MoveDown) {
         raw_move -= Vec3::Y
     }
-    if keyboard.pressed(KeyCode::Space) {
+    if keybinds.pressed(KeyBind::MoveUp) {
         raw_move += Vec3::Y
     }
 
