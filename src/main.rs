@@ -1,27 +1,22 @@
-mod action;
 mod app_data;
-mod freelook;
+mod editor;
 mod input_binding;
 mod map;
-mod selection;
 mod util;
 
 use avian3d::PhysicsPlugins;
-use bevy::{
-    app::AppExit,
-    input::common_conditions::{input_just_pressed, input_just_released},
-    prelude::*,
-};
+use bevy::{app::AppExit, input::common_conditions::input_just_pressed, prelude::*};
 use color_eyre::eyre::Result;
-use freelook::Freelook;
-use input_binding::Binding;
-use util::{enter_state, grab_mouse, release_mouse, IdGen};
+use input_binding::{Binding, InputBindingSystem};
+use util::IdGen;
+
+pub const APP_NAME: &'static str = "Mallet";
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum EditorState {
+pub enum AppState {
     #[default]
-    Select,
-    Fly,
+    InEditor,
+    InGame,
 }
 
 fn main() -> Result<()> {
@@ -30,46 +25,25 @@ fn main() -> Result<()> {
     App::new()
         .add_plugins((
             app_data::plugin,
+            input_binding::plugin,
             DefaultPlugins,
             PhysicsPlugins::default(),
-            input_binding::plugin,
-            freelook::plugin,
-            selection::plugin,
-            action::plugin,
             map::plugin,
+            editor::plugin,
         ))
-        .init_state::<EditorState>()
         // Only update when there is user input. Should be disabled when in-game
         //.insert_resource(WinitSettings::desktop_app())
-        .add_systems(Startup, setup)
+        .init_state::<AppState>()
+        .enable_state_scoped_entities::<AppState>()
         .add_systems(
             PreUpdate,
-            (
-                enter_state(EditorState::Fly).run_if(input_just_pressed(Binding::FlyMode)),
-                enter_state(EditorState::Select).run_if(input_just_released(Binding::FlyMode)),
-                exit_app.run_if(input_just_pressed(Binding::Quit)),
-            ),
+            (exit_app.run_if(input_just_pressed(Binding::Quit)),).after(InputBindingSystem),
         )
         .add_systems(PreUpdate, file_drop)
         .init_resource::<IdGen>()
         .run();
 
     Ok(())
-}
-
-fn setup(mut commands: Commands) {
-    commands.spawn((
-        Freelook::default(),
-        Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
-        Projection::Perspective(PerspectiveProjection {
-            fov: 72.0_f32.to_radians(),
-            ..default()
-        }),
-    ));
-    commands.spawn((
-        DirectionalLight::default(),
-        Transform::from_rotation(Quat::from_rotation_x(-0.8)),
-    ));
 }
 
 fn file_drop(mut evr_dnd: EventReader<FileDragAndDrop>) {

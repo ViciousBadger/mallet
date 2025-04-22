@@ -10,9 +10,9 @@ use bevy::{
 };
 
 use crate::{
+    editor::EditorState,
     input_binding::{Binding, InputBindingSystem},
     util::input_just_toggled,
-    EditorState,
 };
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]

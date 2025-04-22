@@ -1,13 +1,12 @@
 use bevy::{
     input::{common_conditions::input_just_pressed, mouse::MouseMotion},
     prelude::*,
-    window::RequestRedraw,
 };
 
 use crate::{
+    editor::EditorState,
     input_binding::{Binding, InputBindingSystem},
     util::{grab_mouse, release_mouse, Gimbal},
-    EditorState,
 };
 
 #[derive(Component)]
