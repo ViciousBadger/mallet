@@ -2,33 +2,12 @@ pub mod actions;
 pub mod freelook;
 pub mod selection;
 
-use crate::input_binding::{Binding, InputBindingSystem};
-use bevy::{
-    input::common_conditions::{input_just_pressed, input_just_released},
-    prelude::*,
-};
+use crate::AppState;
+use bevy::prelude::*;
 use freelook::Freelook;
-
-use crate::{util::enter_state, AppState};
-
-#[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum EditorState {
-    #[default]
-    Select,
-    Fly,
-}
 
 pub fn plugin(app: &mut App) {
     app.add_plugins((freelook::plugin, selection::plugin, actions::plugin))
-        .init_state::<EditorState>()
-        .add_systems(
-            PreUpdate,
-            (
-                enter_state(EditorState::Fly).run_if(input_just_pressed(Binding::FlyMode)),
-                enter_state(EditorState::Select).run_if(input_just_released(Binding::FlyMode)),
-            )
-                .after(InputBindingSystem),
-        )
         .add_systems(OnEnter(AppState::InEditor), init_editor)
         .add_systems(OnExit(AppState::InEditor), teardown_editor);
 }

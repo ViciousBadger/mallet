@@ -1,12 +1,14 @@
 use bevy::{
-    input::{common_conditions::input_just_pressed, mouse::MouseMotion},
+    input::{
+        common_conditions::{input_just_pressed, input_just_released},
+        mouse::MouseMotion,
+    },
     prelude::*,
 };
 
 use crate::{
-    editor::EditorState,
     input_binding::{Binding, InputBindingSystem},
-    util::{grab_mouse, release_mouse, Gimbal},
+    util::{enter_state, grab_mouse, release_mouse, Gimbal},
 };
 
 #[derive(Component)]
@@ -25,6 +27,13 @@ impl Default for Freelook {
             velocity: Vec3::ZERO,
         }
     }
+}
+
+#[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FreelookState {
+    #[default]
+    Unlocked,
+    Locked,
 }
 
 // Should be shared w/ first-person look code at some point.
@@ -102,20 +111,23 @@ fn freelook_movement(mut q_freelook: Query<(&mut Freelook, &mut Transform)>, tim
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(
-        PreUpdate,
-        (
-            freelook_input,
-            modify_freelook_speed(1).run_if(input_just_pressed(Binding::FlySpeedUp)),
-            modify_freelook_speed(-1).run_if(input_just_pressed(Binding::FlySpeedDown)),
-            gimbal_mouse_rotation.run_if(in_state(EditorState::Fly)),
+    app.init_state::<FreelookState>()
+        .add_systems(
+            PreUpdate,
+            (
+                freelook_input,
+                modify_freelook_speed(1).run_if(input_just_pressed(Binding::FlySpeedUp)),
+                modify_freelook_speed(-1).run_if(input_just_pressed(Binding::FlySpeedDown)),
+                gimbal_mouse_rotation.run_if(in_state(FreelookState::Locked)),
+                enter_state(FreelookState::Locked).run_if(input_just_pressed(Binding::FlyMode)),
+                enter_state(FreelookState::Unlocked).run_if(input_just_released(Binding::FlyMode)),
+            )
+                .after(InputBindingSystem),
         )
-            .after(InputBindingSystem),
-    )
-    .add_systems(Update, freelook_movement)
-    .add_systems(OnEnter(EditorState::Fly), grab_mouse)
-    .add_systems(
-        OnExit(EditorState::Fly),
-        (release_mouse, freelook_input_reset),
-    );
+        .add_systems(Update, freelook_movement)
+        .add_systems(OnEnter(FreelookState::Locked), grab_mouse)
+        .add_systems(
+            OnExit(FreelookState::Locked),
+            (release_mouse, freelook_input_reset),
+        );
 }

@@ -10,7 +10,7 @@ use bevy::{
 };
 
 use crate::{
-    editor::EditorState,
+    editor::freelook::FreelookState,
     input_binding::{Binding, InputBindingSystem},
     util::input_just_toggled,
 };
@@ -467,7 +467,7 @@ pub fn plugin(app: &mut App) {
                 scroll_intersecting(-1).run_if(input_just_pressed(Binding::SelPrev)),
             )
                 .after(InputBindingSystem)
-                .run_if(in_state(EditorState::Select)),
+                .run_if(in_state(FreelookState::Unlocked)),
         )
         .add_systems(
             Update,
@@ -475,7 +475,7 @@ pub fn plugin(app: &mut App) {
                 select_normal.run_if(in_state(SelMode::Normal).and(on_event::<MouseMotion>)),
                 select_locked.run_if(in_state(SelIsAxisLocked).and(on_event::<MouseMotion>)),
             )
-                .run_if(in_state(EditorState::Select)),
+                .run_if(in_state(FreelookState::Unlocked)),
         )
         // .add_systems(Update, reposition_sel_grid.run_if(on_event::<SelChanged>))
         .add_systems(
