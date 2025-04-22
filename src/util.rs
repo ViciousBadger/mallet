@@ -5,12 +5,6 @@ use bevy::{
 };
 use ulid::Ulid;
 
-/// For gimbal-locked rotation.
-#[derive(Component, Default)]
-pub struct Gimbal {
-    pub yaw_pitch: Vec2,
-}
-
 #[derive(Resource)]
 pub struct IdGen(ulid::Generator);
 
@@ -48,5 +42,5 @@ pub fn input_just_toggled<T>(input: T) -> impl FnMut(Res<ButtonInput<T>>) -> boo
 where
     T: Copy + Eq + core::hash::Hash + Send + Sync + 'static,
 {
-    move |inputs: Res<ButtonInput<T>>| inputs.just_released(input) || inputs.just_released(input)
+    move |inputs: Res<ButtonInput<T>>| inputs.just_pressed(input) || inputs.just_released(input)
 }

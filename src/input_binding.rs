@@ -6,6 +6,7 @@ use bevy::{prelude::*, utils::HashMap};
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum Binding {
     Quit,
+    Playtest,
 
     // Camera
     MoveLeft,
@@ -108,6 +109,7 @@ impl Default for InputBindings {
         let mut map = HashMap::<Binding, BoundInput>::new();
 
         map.insert(Binding::Quit, BoundInput::key(KeyCode::KeyQ).with_control());
+        map.insert(Binding::Playtest, BoundInput::key(KeyCode::Tab));
         map.insert(Binding::MoveLeft, BoundInput::key(KeyCode::KeyA));
         map.insert(Binding::MoveRight, BoundInput::key(KeyCode::KeyD));
         map.insert(Binding::MoveBackwards, BoundInput::key(KeyCode::KeyS));

@@ -239,7 +239,7 @@ fn set_axis_lock(axis: SelAxis) -> impl Fn(Res<State<SelMode>>, ResMut<NextState
 }
 
 fn reset_sel_mode(mut next_sel_mode: ResMut<NextState<SelMode>>) {
-    next_sel_mode.set(SelMode::Normal)
+    next_sel_mode.set(SelMode::default())
 }
 
 fn set_axis_lock_selected(sel: Res<Sel>, mut next_sel_mode: ResMut<NextState<SelMode>>) {
@@ -283,17 +283,17 @@ fn select_normal(
     let window = q_window.single();
 
     if let Some(mouse_pos) = window.cursor_position() {
-        let (cam, cam_trans) = q_camera.single();
+        if let Ok((cam, cam_trans)) = q_camera.get_single() {
+            if let Ok(ray) = cam.viewport_to_world(cam_trans, mouse_pos) {
+                let plane = sel.axis.as_plane();
 
-        if let Ok(ray) = cam.viewport_to_world(cam_trans, mouse_pos) {
-            let plane = sel.axis.as_plane();
-
-            if let Some(dist) = ray.intersect_plane(sel.grid_center(), plane) {
-                let point = ray.get_point(dist);
-                let point = if sel.snap { Vec3::round(point) } else { point };
-                let point = point.clamp(sel.min_pos(), sel.max_pos());
-                sel.position = point;
-                sel_changed.send(SelChanged);
+                if let Some(dist) = ray.intersect_plane(sel.grid_center(), plane) {
+                    let point = ray.get_point(dist);
+                    let point = if sel.snap { Vec3::round(point) } else { point };
+                    let point = point.clamp(sel.min_pos(), sel.max_pos());
+                    sel.position = point;
+                    sel_changed.send(SelChanged);
+                }
             }
         }
     }
@@ -440,16 +440,18 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             PreUpdate,
             (
-                reset_axis_offset.run_if(input_just_pressed(Binding::ResetSelAxisOffset)),
+                // Switching selectin axis (what axis is da grid on)
                 (
                     switch_sel_axis(SelAxis::X).run_if(input_just_pressed(Binding::SetSelAxisX)),
                     switch_sel_axis(SelAxis::Y).run_if(input_just_pressed(Binding::SetSelAxisY)),
                     switch_sel_axis(SelAxis::Z).run_if(input_just_pressed(Binding::SetSelAxisZ)),
                 )
                     .run_if(in_state(SelMode::Normal)),
+                // Axis locking (sel mode 2) and offset
                 set_axis_lock(SelAxis::X).run_if(input_just_pressed(Binding::AxisLockX)),
                 set_axis_lock(SelAxis::Y).run_if(input_just_pressed(Binding::AxisLockY)),
                 set_axis_lock(SelAxis::Z).run_if(input_just_pressed(Binding::AxisLockZ)),
+                set_axis_lock_selected.run_if(input_just_pressed(Binding::AxisLockSelected)),
                 reset_sel_mode.run_if(
                     input_just_released(Binding::AxisLockX).or(input_just_released(
                         Binding::AxisLockY,
@@ -457,14 +459,14 @@ pub fn plugin(app: &mut App) {
                     .or(input_just_released(Binding::AxisLockZ)
                         .or(input_just_released(Binding::AxisLockSelected)))),
                 ),
-                set_axis_lock(SelAxis::Y).run_if(input_just_pressed(Binding::AxisLockY)),
-                set_axis_lock(SelAxis::Z).run_if(input_just_pressed(Binding::AxisLockZ)),
-                set_axis_lock_selected.run_if(input_just_pressed(Binding::AxisLockSelected)),
+                reset_axis_offset.run_if(input_just_pressed(Binding::ResetSelAxisOffset)),
+                // Selected targets
+                scroll_intersecting(1).run_if(input_just_pressed(Binding::SelNext)),
+                scroll_intersecting(-1).run_if(input_just_pressed(Binding::SelPrev)),
+                // Snapping
                 toggle_snap.run_if(
                     input_just_pressed(KeyCode::KeyT).or(input_just_toggled(KeyCode::AltLeft)),
                 ),
-                scroll_intersecting(1).run_if(input_just_pressed(Binding::SelNext)),
-                scroll_intersecting(-1).run_if(input_just_pressed(Binding::SelPrev)),
             )
                 .after(InputBindingSystem)
                 .run_if(in_state(FreelookState::Unlocked)),

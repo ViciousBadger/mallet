@@ -2,21 +2,21 @@ pub mod actions;
 pub mod freelook;
 pub mod selection;
 
-use crate::AppState;
+use crate::{AppState, AppStateSwitchConf};
 use bevy::prelude::*;
 use freelook::Freelook;
 
-pub fn plugin(app: &mut App) {
-    app.add_plugins((freelook::plugin, selection::plugin, actions::plugin))
-        .add_systems(OnEnter(AppState::InEditor), init_editor)
-        .add_systems(OnExit(AppState::InEditor), teardown_editor);
-}
+fn init_editor(mut commands: Commands, init_conf: Option<Res<AppStateSwitchConf>>) {
+    let default_conf = AppStateSwitchConf::default();
+    let conf = init_conf
+        .map(|res| res.into_inner())
+        .unwrap_or(&default_conf);
 
-fn init_editor(mut commands: Commands) {
     commands.spawn((
         StateScoped(AppState::InEditor),
+        Transform::from_translation(conf.pos),
+        conf.look.clone(),
         Freelook::default(),
-        Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
         Projection::Perspective(PerspectiveProjection {
             fov: 72.0_f32.to_radians(),
             ..default()
@@ -31,4 +31,10 @@ fn init_editor(mut commands: Commands) {
 
 fn teardown_editor(_: Commands) {
     //Remove resources etc...
+}
+
+pub fn plugin(app: &mut App) {
+    app.add_plugins((freelook::plugin, selection::plugin, actions::plugin))
+        .add_systems(OnEnter(AppState::InEditor), init_editor)
+        .add_systems(OnExit(AppState::InEditor), teardown_editor);
 }
