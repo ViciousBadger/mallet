@@ -8,10 +8,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 
-use crate::{
-    keybinds::{self, KeyBind},
-    util::input_just_toggled,
-};
+use crate::{keybinds::KeyBind, util::input_just_toggled};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SelAxis {
@@ -37,6 +34,7 @@ impl SelAxis {
 
 #[derive(Resource, Default)]
 pub struct Sel {
+    pub origin: Vec3,
     pub position: Vec3,
     pub target: Option<Entity>,
     pub axis: SelAxis,
@@ -45,7 +43,7 @@ pub struct Sel {
 }
 
 impl Sel {
-    pub fn grid_center(&self) -> Vec3 {
+    pub fn plane_center(&self) -> Vec3 {
         self.axis.as_unit_vec()
             * if self.snap {
                 self.axis_offset.round()
@@ -53,8 +51,17 @@ impl Sel {
                 self.axis_offset
             }
     }
-    pub fn as_isometry(&self) -> Isometry3d {
-        self.axis.as_plane().isometry_from_xy(self.grid_center())
+
+    pub fn min_pos(&self) -> Vec3 {
+        self.origin - Vec3::ONE * SEL_DIST_LIMIT
+    }
+
+    pub fn max_pos(&self) -> Vec3 {
+        self.origin + Vec3::ONE * SEL_DIST_LIMIT
+    }
+
+    pub fn clamp_vec(&self, vec: Vec3) -> Vec3 {
+        vec.clamp(self.min_pos(), self.max_pos())
     }
 }
 
@@ -149,8 +156,9 @@ pub fn plugin(app: &mut App) {
 fn draw_sel_gizmos(sel: Res<Sel>, sel_mode: Res<State<SelMode>>, mut gizmos: Gizmos) {
     let grid_line_color = css::DIM_GRAY.with_alpha(0.1);
 
+    let grid_iso = sel.axis.as_plane().isometry_from_xy(sel.plane_center());
     gizmos.grid(
-        sel.as_isometry(),
+        grid_iso,
         UVec2::new(SEL_DIST_LIMIT as u32 * 2, SEL_DIST_LIMIT as u32 * 2),
         Vec2::ONE,
         grid_line_color,
@@ -163,14 +171,13 @@ fn draw_sel_gizmos(sel: Res<Sel>, sel_mode: Res<State<SelMode>>, mut gizmos: Giz
 
     let sel_color = css::GOLD;
 
-    fn axis_line(gizmos: &mut Gizmos, pos: &Vec3, v: Vec3, color: impl Into<Color>) {
-        gizmos.line(pos - v * SEL_DIST_LIMIT, pos + v * SEL_DIST_LIMIT, color);
-    }
+    let min = sel.min_pos();
+    let max = sel.max_pos();
 
-    axis_line(
-        &mut gizmos,
-        &sel.position,
-        Vec3::X,
+    // X axis
+    gizmos.line(
+        Vec3::new(min.x, sel.position.y, sel.position.z),
+        Vec3::new(max.x, sel.position.y, sel.position.z),
         if *sel_mode == SelMode::AxisLocked(SelAxis::X) {
             sel_color
         } else {
@@ -178,10 +185,10 @@ fn draw_sel_gizmos(sel: Res<Sel>, sel_mode: Res<State<SelMode>>, mut gizmos: Giz
         },
     );
 
-    axis_line(
-        &mut gizmos,
-        &sel.position,
-        Vec3::Y,
+    // Y axis
+    gizmos.line(
+        Vec3::new(sel.position.x, min.y, sel.position.z),
+        Vec3::new(sel.position.x, max.y, sel.position.z),
         if *sel_mode == SelMode::AxisLocked(SelAxis::Y) {
             sel_color
         } else {
@@ -189,10 +196,10 @@ fn draw_sel_gizmos(sel: Res<Sel>, sel_mode: Res<State<SelMode>>, mut gizmos: Giz
         },
     );
 
-    axis_line(
-        &mut gizmos,
-        &sel.position,
-        Vec3::Z,
+    // Z axis
+    gizmos.line(
+        Vec3::new(sel.position.x, sel.position.y, min.z),
+        Vec3::new(sel.position.x, sel.position.y, max.z),
         if *sel_mode == SelMode::AxisLocked(SelAxis::Z) {
             sel_color
         } else {
@@ -252,10 +259,10 @@ fn select_normal(
         if let Ok(ray) = cam.viewport_to_world(cam_trans, mouse_pos) {
             let plane = sel.axis.as_plane();
 
-            if let Some(dist) = ray.intersect_plane(sel.grid_center(), plane) {
+            if let Some(dist) = ray.intersect_plane(sel.plane_center(), plane) {
                 let point = ray.get_point(dist);
                 let point = if sel.snap { Vec3::round(point) } else { point };
-                let point = point.clamp(Vec3::NEG_ONE * SEL_DIST_LIMIT, Vec3::ONE * SEL_DIST_LIMIT);
+                let point = point.clamp(sel.min_pos(), sel.max_pos());
                 sel.position = point;
             }
         }
@@ -289,28 +296,26 @@ fn select_locked(
             if let Some(dist) = ray.intersect_plane(sel.position, plane) {
                 let point = ray.get_point(dist);
                 let point = if sel.snap { Vec3::round(point) } else { point };
+                let point = sel.clamp_vec(point);
 
                 match axis {
                     SelAxis::X => {
-                        let target_x = point.x.clamp(-SEL_DIST_LIMIT, SEL_DIST_LIMIT);
                         if axis == &sel.axis {
-                            sel.axis_offset = target_x
+                            sel.axis_offset = point.x
                         };
-                        sel.position.x = target_x;
+                        sel.position.x = point.x;
                     }
                     SelAxis::Y => {
-                        let target_y = point.y.clamp(-SEL_DIST_LIMIT, SEL_DIST_LIMIT);
                         if axis == &sel.axis {
-                            sel.axis_offset = target_y;
+                            sel.axis_offset = point.y;
                         };
-                        sel.position.y = target_y;
+                        sel.position.y = point.y;
                     }
                     SelAxis::Z => {
-                        let target_z = point.z.clamp(-SEL_DIST_LIMIT, SEL_DIST_LIMIT);
                         if axis == &sel.axis {
-                            sel.axis_offset = target_z;
+                            sel.axis_offset = point.z;
                         };
-                        sel.position.z = target_z;
+                        sel.position.z = point.z;
                     }
                 }
                 sel_changed.send(SelChanged);

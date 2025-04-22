@@ -140,7 +140,6 @@ pub fn plugin(app: &mut App) {
 }
 
 fn clear_keybind_inputs(mut bind_input: ResMut<ButtonInput<KeyBind>>) {
-    info!("clear");
     bind_input.reset_all();
 }
 

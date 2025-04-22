@@ -12,7 +12,7 @@ use bevy::{
     asset::{io::AssetSourceBuilder, RenderAssetUsages},
     input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
-    winit::WinitSettings,
+    winit::{self, WinitSettings},
 };
 use camera::{
     freelook_input, freelook_input_reset, freelook_movement, gimbal_mouse_rotation,
@@ -62,6 +62,7 @@ fn main() -> Result<()> {
             OnExit(EditorState::Fly),
             (release_mouse, freelook_input_reset),
         )
+        .add_systems(PreUpdate, file_drop)
         .init_resource::<IdGen>()
         .run();
 
@@ -81,6 +82,18 @@ fn setup(mut commands: Commands) {
         DirectionalLight::default(),
         Transform::from_rotation(Quat::from_rotation_x(-0.8)),
     ));
+}
+
+fn file_drop(mut evr_dnd: EventReader<FileDragAndDrop>) {
+    for ev in evr_dnd.read() {
+        info!("dnd event: {:?}", ev);
+        if let FileDragAndDrop::DroppedFile { window, path_buf } = ev {
+            info!(
+                "Dropped file with path: {:?}, in window id: {:?}",
+                path_buf, window
+            );
+        }
+    }
 }
 
 fn exit_app(mut exit_events: ResMut<Events<AppExit>>) {
