@@ -150,15 +150,21 @@ pub fn plugin(app: &mut App) {
             ),
         )
         // .add_systems(Update, reposition_sel_grid.run_if(on_event::<SelChanged>))
-        .add_systems(PostUpdate, draw_sel_gizmos);
+        .add_systems(PostUpdate, (draw_sel_gizmos, move_grid_origin_to_camera));
 }
 
 fn draw_sel_gizmos(sel: Res<Sel>, sel_mode: Res<State<SelMode>>, mut gizmos: Gizmos) {
     let grid_line_color = css::DIM_GRAY.with_alpha(0.1);
 
-    let grid_iso = sel.axis.as_plane().isometry_from_xy(sel.plane_center());
+    let grid_center = match sel.axis {
+        SelAxis::X => Vec3::new(sel.axis_offset, sel.origin.y, sel.origin.z),
+        SelAxis::Y => Vec3::new(sel.origin.x, sel.axis_offset, sel.origin.z),
+        SelAxis::Z => Vec3::new(sel.origin.x, sel.origin.y, sel.axis_offset),
+    };
+    let mut iso = sel.axis.as_plane().isometry_from_xy(sel.plane_center());
+    iso.translation = grid_center.into();
     gizmos.grid(
-        grid_iso,
+        iso,
         UVec2::new(SEL_DIST_LIMIT as u32 * 2, SEL_DIST_LIMIT as u32 * 2),
         Vec2::ONE,
         grid_line_color,
@@ -245,6 +251,21 @@ fn toggle_snap(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChanged>) {
 }
 
 const SEL_DIST_LIMIT: f32 = 64.0;
+
+fn move_grid_origin_to_camera(
+    q_camera: Query<&GlobalTransform, With<Camera>>,
+    mut sel: ResMut<Sel>,
+) {
+    if let Ok(camera_transform) = q_camera.get_single() {
+        sel.origin = camera_transform.translation().round();
+        // Ignore limits for current axis.. this may be dumb (u can move the axis offset really far away)
+        match sel.axis {
+            SelAxis::X => sel.origin.x = sel.axis_offset,
+            SelAxis::Y => sel.origin.y = sel.axis_offset,
+            SelAxis::Z => sel.origin.z = sel.axis_offset,
+        }
+    }
+}
 
 fn select_normal(
     q_window: Query<&Window, With<PrimaryWindow>>,
