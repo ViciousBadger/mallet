@@ -3,7 +3,13 @@ use bevy::{
     state::state::FreelyMutableState,
     window::{CursorGrabMode, PrimaryWindow},
 };
-use ulid::{Generator, Ulid};
+use ulid::Ulid;
+
+/// For gimbal-locked rotation.
+#[derive(Component, Default)]
+pub struct Gimbal {
+    pub yaw_pitch: Vec2,
+}
 
 #[derive(Resource)]
 pub struct IdGen(ulid::Generator);

@@ -1,6 +1,7 @@
 use bevy::{color::palettes::css, input::common_conditions::input_just_pressed, prelude::*};
 
 use crate::{
+    input_binding::InputBindingSystem,
     map::{
         brush::{Brush, BrushBounds},
         CreateNewMapNode, MapNodeKind,
@@ -22,36 +23,6 @@ pub struct BuildBrushProcess {
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 struct ActionGizmos {}
-
-pub fn plugin(app: &mut App) {
-    app.init_state::<EditorAction>()
-        .insert_gizmo_config(
-            ActionGizmos {},
-            GizmoConfig {
-                line_width: 3.0,
-                line_style: GizmoLineStyle::Dotted,
-                depth_bias: -0.015,
-                ..default()
-            },
-        )
-        .add_systems(
-            Update,
-            (
-                (start_building_brush_here.run_if(input_just_pressed(MouseButton::Left)),)
-                    .run_if(in_state(EditorAction::None)),
-                (
-                    build_brush_draw_gizmos,
-                    end_building_brush_here.run_if(input_just_pressed(MouseButton::Left)),
-                )
-                    .run_if(in_state(EditorAction::BuildBrush)),
-                cancel_action.run_if(
-                    not(in_state(EditorAction::None)).and(input_just_pressed(KeyCode::Escape)),
-                ),
-            ),
-        )
-        .add_systems(OnExit(EditorAction::BuildBrush), build_brush_cleanup)
-        .add_systems(OnEnter(EditorAction::None), any_action_cleanup);
-}
 
 fn cancel_action(mut next_editor_action: ResMut<NextState<EditorAction>>) {
     next_editor_action.set(EditorAction::None);
@@ -113,4 +84,35 @@ fn build_brush_cleanup(mut commands: Commands) {
 
 fn any_action_cleanup(mut next_sel_mode: ResMut<NextState<SelMode>>) {
     // next_sel_mode.set(SelMode::Normal);
+}
+
+pub fn plugin(app: &mut App) {
+    app.init_state::<EditorAction>()
+        .insert_gizmo_config(
+            ActionGizmos {},
+            GizmoConfig {
+                line_width: 3.0,
+                line_style: GizmoLineStyle::Dotted,
+                depth_bias: -0.015,
+                ..default()
+            },
+        )
+        .add_systems(
+            PreUpdate,
+            (
+                (start_building_brush_here.run_if(input_just_pressed(MouseButton::Left)),)
+                    .run_if(in_state(EditorAction::None)),
+                (
+                    build_brush_draw_gizmos,
+                    end_building_brush_here.run_if(input_just_pressed(MouseButton::Left)),
+                )
+                    .run_if(in_state(EditorAction::BuildBrush)),
+                cancel_action.run_if(
+                    not(in_state(EditorAction::None)).and(input_just_pressed(KeyCode::Escape)),
+                ),
+            )
+                .after(InputBindingSystem),
+        )
+        .add_systems(OnExit(EditorAction::BuildBrush), build_brush_cleanup)
+        .add_systems(OnEnter(EditorAction::None), any_action_cleanup);
 }

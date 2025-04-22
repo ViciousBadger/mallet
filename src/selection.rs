@@ -1,7 +1,4 @@
-use avian3d::{
-    parry::na::Isometry3,
-    prelude::{AnyCollider, Collider, SpatialQuery, SpatialQueryFilter},
-};
+use avian3d::prelude::{AnyCollider, Collider, SpatialQuery, SpatialQueryFilter};
 use bevy::{
     color::palettes::css,
     input::{
@@ -9,11 +6,14 @@ use bevy::{
         mouse::MouseMotion,
     },
     prelude::*,
-    utils::{HashMap, HashSet},
     window::PrimaryWindow,
 };
 
-use crate::{keybinds::KeyBind, util::input_just_toggled};
+use crate::{
+    input_binding::{Binding, InputBindingSystem},
+    util::input_just_toggled,
+    EditorState,
+};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SelAxis {
@@ -135,79 +135,6 @@ struct SelAxisGizmos {}
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 struct SelTargetGizmos {}
-
-pub fn plugin(app: &mut App) {
-    app.init_resource::<Sel>()
-        .init_resource::<SelTarget>()
-        .insert_gizmo_config(
-            SelGridGizmos {},
-            GizmoConfig {
-                line_width: 1.5,
-                ..default()
-            },
-        )
-        .insert_gizmo_config(
-            SelAxisGizmos {},
-            GizmoConfig {
-                depth_bias: -0.01,
-                ..default()
-            },
-        )
-        .insert_gizmo_config(
-            SelTargetGizmos {},
-            GizmoConfig {
-                line_width: 4.0,
-                depth_bias: -1.0,
-                ..default()
-            },
-        )
-        .add_event::<SelChanged>()
-        .init_state::<SelMode>()
-        .add_computed_state::<SelIsAxisLocked>()
-        .add_computed_state::<LockedAxis>()
-        .add_systems(
-            Update,
-            (
-                select_normal.run_if(in_state(SelMode::Normal).and(on_event::<MouseMotion>)),
-                select_locked.run_if(in_state(SelIsAxisLocked).and(on_event::<MouseMotion>)),
-                reset_axis_offset.run_if(input_just_pressed(KeyBind::ResetSelAxisOffset)),
-                (
-                    switch_sel_axis(SelAxis::X).run_if(input_just_pressed(KeyBind::SetSelAxisX)),
-                    switch_sel_axis(SelAxis::Y).run_if(input_just_pressed(KeyBind::SetSelAxisY)),
-                    switch_sel_axis(SelAxis::Z).run_if(input_just_pressed(KeyBind::SetSelAxisZ)),
-                )
-                    .run_if(in_state(SelMode::Normal)),
-                set_axis_lock(SelAxis::X).run_if(input_just_pressed(KeyBind::AxisLockX)),
-                set_axis_lock(SelAxis::Y).run_if(input_just_pressed(KeyBind::AxisLockY)),
-                set_axis_lock(SelAxis::Z).run_if(input_just_pressed(KeyBind::AxisLockZ)),
-                reset_sel_mode.run_if(
-                    input_just_released(KeyBind::AxisLockX).or(input_just_released(
-                        KeyBind::AxisLockY,
-                    )
-                    .or(input_just_released(KeyBind::AxisLockZ)
-                        .or(input_just_released(KeyBind::AxisLockSelected)))),
-                ),
-                set_axis_lock(SelAxis::Y).run_if(input_just_pressed(KeyBind::AxisLockY)),
-                set_axis_lock(SelAxis::Z).run_if(input_just_pressed(KeyBind::AxisLockZ)),
-                set_axis_lock_selected.run_if(input_just_pressed(KeyBind::AxisLockSelected)),
-                toggle_snap.run_if(
-                    input_just_pressed(KeyCode::KeyT).or(input_just_toggled(KeyCode::AltLeft)),
-                ),
-                scroll_intersecting(1).run_if(input_just_pressed(KeyBind::SelNext)),
-                scroll_intersecting(-1).run_if(input_just_pressed(KeyBind::SelPrev)),
-            ),
-        )
-        // .add_systems(Update, reposition_sel_grid.run_if(on_event::<SelChanged>))
-        .add_systems(
-            PostUpdate,
-            (
-                draw_sel_gizmos,
-                draw_sel_target_gizmos,
-                move_grid_origin_to_camera,
-                find_entites_in_selection.run_if(on_event::<SelChanged>),
-            ),
-        );
-}
 
 fn draw_sel_gizmos(
     sel: Res<Sel>,
@@ -331,9 +258,19 @@ const SEL_DIST_LIMIT: f32 = 64.0;
 fn move_grid_origin_to_camera(
     q_camera: Query<&GlobalTransform, (With<Camera>, Changed<GlobalTransform>)>,
     mut sel: ResMut<Sel>,
+    mut sel_changed: EventWriter<SelChanged>,
 ) {
     if let Ok(camera_transform) = q_camera.get_single() {
         sel.origin = camera_transform.translation().round();
+        let cur_offs = sel.axis_offset;
+        match sel.axis {
+            SelAxis::X => sel.axis_offset = sel.axis_offset.clamp(sel.min_pos().x, sel.max_pos().x),
+            SelAxis::Y => sel.axis_offset = sel.axis_offset.clamp(sel.min_pos().y, sel.max_pos().y),
+            SelAxis::Z => sel.axis_offset = sel.axis_offset.clamp(sel.min_pos().z, sel.max_pos().z),
+        }
+        if sel.axis_offset != cur_offs {
+            sel_changed.send(SelChanged);
+        }
     }
 }
 
@@ -469,4 +406,85 @@ fn reset_axis_offset(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChang
         SelAxis::Z => sel.position.z = 0.0,
     };
     sel_changed.send(SelChanged);
+}
+
+pub fn plugin(app: &mut App) {
+    app.init_resource::<Sel>()
+        .init_resource::<SelTarget>()
+        .insert_gizmo_config(
+            SelGridGizmos {},
+            GizmoConfig {
+                line_width: 1.5,
+                ..default()
+            },
+        )
+        .insert_gizmo_config(
+            SelAxisGizmos {},
+            GizmoConfig {
+                depth_bias: -0.01,
+                ..default()
+            },
+        )
+        .insert_gizmo_config(
+            SelTargetGizmos {},
+            GizmoConfig {
+                line_width: 4.0,
+                depth_bias: -1.0,
+                ..default()
+            },
+        )
+        .add_event::<SelChanged>()
+        .init_state::<SelMode>()
+        .add_computed_state::<SelIsAxisLocked>()
+        .add_computed_state::<LockedAxis>()
+        .add_systems(
+            PreUpdate,
+            (
+                reset_axis_offset.run_if(input_just_pressed(Binding::ResetSelAxisOffset)),
+                (
+                    switch_sel_axis(SelAxis::X).run_if(input_just_pressed(Binding::SetSelAxisX)),
+                    switch_sel_axis(SelAxis::Y).run_if(input_just_pressed(Binding::SetSelAxisY)),
+                    switch_sel_axis(SelAxis::Z).run_if(input_just_pressed(Binding::SetSelAxisZ)),
+                )
+                    .run_if(in_state(SelMode::Normal)),
+                set_axis_lock(SelAxis::X).run_if(input_just_pressed(Binding::AxisLockX)),
+                set_axis_lock(SelAxis::Y).run_if(input_just_pressed(Binding::AxisLockY)),
+                set_axis_lock(SelAxis::Z).run_if(input_just_pressed(Binding::AxisLockZ)),
+                reset_sel_mode.run_if(
+                    input_just_released(Binding::AxisLockX).or(input_just_released(
+                        Binding::AxisLockY,
+                    )
+                    .or(input_just_released(Binding::AxisLockZ)
+                        .or(input_just_released(Binding::AxisLockSelected)))),
+                ),
+                set_axis_lock(SelAxis::Y).run_if(input_just_pressed(Binding::AxisLockY)),
+                set_axis_lock(SelAxis::Z).run_if(input_just_pressed(Binding::AxisLockZ)),
+                set_axis_lock_selected.run_if(input_just_pressed(Binding::AxisLockSelected)),
+                toggle_snap.run_if(
+                    input_just_pressed(KeyCode::KeyT).or(input_just_toggled(KeyCode::AltLeft)),
+                ),
+                scroll_intersecting(1).run_if(input_just_pressed(Binding::SelNext)),
+                scroll_intersecting(-1).run_if(input_just_pressed(Binding::SelPrev)),
+            )
+                .after(InputBindingSystem)
+                .run_if(in_state(EditorState::Select)),
+        )
+        .add_systems(
+            Update,
+            (
+                select_normal.run_if(in_state(SelMode::Normal).and(on_event::<MouseMotion>)),
+                select_locked.run_if(in_state(SelIsAxisLocked).and(on_event::<MouseMotion>)),
+            )
+                .run_if(in_state(EditorState::Select)),
+        )
+        // .add_systems(Update, reposition_sel_grid.run_if(on_event::<SelChanged>))
+        .add_systems(
+            PostUpdate,
+            (
+                draw_sel_gizmos,
+                draw_sel_target_gizmos,
+                move_grid_origin_to_camera,
+                find_entites_in_selection.run_if(on_event::<SelChanged>),
+            ),
+        );
 }

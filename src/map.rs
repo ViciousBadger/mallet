@@ -1,17 +1,16 @@
 pub mod brush;
 
-use crate::{app_data::AppDataPath, util::IdGen};
+use crate::{app_data::AppDataPath, input_binding::InputBindingSystem, util::IdGen};
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
-    color::palettes::css,
     input::common_conditions::input_just_released,
     prelude::*,
     tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
     utils::{HashMap, HashSet},
 };
 use brush::Brush;
-use rand::{Rng, RngCore, SeedableRng};
-use serde::{de::value::U64Deserializer, Deserialize, Serialize};
+use rand::RngCore;
+use serde::{Deserialize, Serialize};
 use std::{fs::File, path::PathBuf};
 use ulid::{serde::ulid_as_u128, Ulid};
 use wyrand::WyRand;
@@ -74,33 +73,6 @@ pub const DEFAULT_MAP_NAME: &'static str = "map";
 
 pub fn default_map_filename() -> String {
     format!("{}.{}", DEFAULT_MAP_NAME, MAP_FILE_EXT)
-}
-
-pub fn plugin(app: &mut App) {
-    app.add_systems(Startup, start_loading_map)
-        .add_systems(Startup, init_empty_map)
-        .add_systems(
-            First,
-            (unload_map, init_empty_map).run_if(input_just_released(KeyCode::KeyR)),
-        )
-        .add_systems(PreUpdate, deploy_nodes)
-        .add_systems(
-            PostUpdate,
-            save_map.run_if(resource_exists::<LiveGameMap>.and(on_event::<AppExit>)),
-        )
-        .add_systems(
-            Last,
-            (
-                insert_map_when_loaded.run_if(resource_exists::<LoadingMap>),
-                (
-                    create_new_map_nodes,
-                    remove_despawned_entites_from_lookup_table,
-                )
-                    .run_if(resource_exists::<LiveGameMap>),
-            ),
-        )
-        .add_event::<CreateNewMapNode>()
-        .add_event::<DeployMapNode>();
 }
 
 fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
@@ -251,4 +223,35 @@ fn deploy_nodes(
             }
         }
     }
+}
+
+pub fn plugin(app: &mut App) {
+    app.add_systems(Startup, start_loading_map)
+        .add_systems(Startup, init_empty_map)
+        .add_systems(
+            PreUpdate,
+            (
+                deploy_nodes,
+                (unload_map, init_empty_map)
+                    .run_if(input_just_released(KeyCode::KeyR))
+                    .after(InputBindingSystem),
+            ),
+        )
+        .add_systems(
+            PostUpdate,
+            save_map.run_if(resource_exists::<LiveGameMap>.and(on_event::<AppExit>)),
+        )
+        .add_systems(
+            Last,
+            (
+                insert_map_when_loaded.run_if(resource_exists::<LoadingMap>),
+                (
+                    create_new_map_nodes,
+                    remove_despawned_entites_from_lookup_table,
+                )
+                    .run_if(resource_exists::<LiveGameMap>),
+            ),
+        )
+        .add_event::<CreateNewMapNode>()
+        .add_event::<DeployMapNode>();
 }
