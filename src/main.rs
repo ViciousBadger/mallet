@@ -6,13 +6,11 @@ mod map;
 mod selection;
 mod util;
 
-use action::EditorAction;
+use avian3d::PhysicsPlugins;
 use bevy::{
     app::AppExit,
-    asset::{io::AssetSourceBuilder, RenderAssetUsages},
     input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
-    winit::{self, WinitSettings},
 };
 use camera::{
     freelook_input, freelook_input_reset, freelook_movement, gimbal_mouse_rotation,
@@ -36,6 +34,7 @@ fn main() -> Result<()> {
         .add_plugins((
             app_data::plugin,
             DefaultPlugins,
+            PhysicsPlugins::default(),
             selection::plugin,
             action::plugin,
             map::plugin,

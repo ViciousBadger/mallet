@@ -1,6 +1,7 @@
 pub mod brush;
 
 use crate::{app_data::AppDataPath, util::IdGen};
+use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
     color::palettes::css,
     input::common_conditions::input_just_released,
@@ -216,10 +217,20 @@ fn deploy_nodes(
         entity_commands.retain::<MapNode>();
         entity_commands.despawn_descendants();
 
+        // Once this match is stupid large it should be split up. Perhaps using observer pattern,
+        // fire an event using MapNodeKind generic. Register listeners for each kind.
         match &live_node.kind {
             MapNodeKind::Brush(ref brush) => {
                 // Brush will use base entity as a container for sides.
-                entity_commands.insert((Transform::IDENTITY, Visibility::Visible));
+                let center = brush.bounds.center();
+                let size = brush.bounds.size();
+
+                entity_commands.insert((
+                    Visibility::Visible,
+                    Transform::IDENTITY.with_translation(center),
+                    RigidBody::Static,
+                    Collider::cuboid(size.x, size.y, size.z),
+                ));
 
                 let mut rng = WyRand::new(live_node.id.0 as u64);
                 let color = rng.next_u32();

@@ -1,3 +1,4 @@
+use bevy::input::mouse::MouseWheel;
 use bevy::input::InputSystem;
 use bevy::{prelude::*, utils::HashMap};
 
@@ -25,6 +26,8 @@ pub enum KeyBind {
     ResetSelAxisOffset,
     ToggleSnap,
     HoldSnap,
+    SelNext,
+    SelPrev,
 }
 
 pub struct KeyBindValue {
@@ -37,6 +40,8 @@ pub struct KeyBindValue {
 pub enum KeyBindKind {
     Keyboard(KeyCode),
     Mouse(MouseButton),
+    ScrollUp,
+    ScrollDown,
 }
 
 impl KeyBindValue {
@@ -52,6 +57,24 @@ impl KeyBindValue {
     pub fn mouse_button(button: MouseButton) -> Self {
         Self {
             kind: KeyBindKind::Mouse(button),
+            ctrl: false,
+            shift: false,
+            alt: false,
+        }
+    }
+
+    pub fn scroll_up() -> Self {
+        Self {
+            kind: KeyBindKind::ScrollUp,
+            ctrl: false,
+            shift: false,
+            alt: false,
+        }
+    }
+
+    pub fn scroll_down() -> Self {
+        Self {
+            kind: KeyBindKind::ScrollDown,
             ctrl: false,
             shift: false,
             alt: false,
@@ -120,6 +143,8 @@ impl Default for KeyBinds {
         );
         map.insert(KeyBind::ToggleSnap, KeyBindValue::key(KeyCode::KeyT));
         map.insert(KeyBind::HoldSnap, KeyBindValue::key(KeyCode::AltLeft));
+        map.insert(KeyBind::SelNext, KeyBindValue::scroll_down());
+        map.insert(KeyBind::SelPrev, KeyBindValue::scroll_up());
 
         KeyBinds(map)
     }
@@ -147,9 +172,14 @@ fn input_to_keybind(
     kb_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
     keybinds: Res<KeyBinds>,
+    mut scroll_input: EventReader<MouseWheel>,
     mut bind_input: ResMut<ButtonInput<KeyBind>>,
 ) {
     bind_input.clear();
+
+    // Collect scroll events.
+    let last_scroll = scroll_input.read().last();
+
     for (keybind, bind_val) in keybinds.iter() {
         let ctrl = kb_input.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
         let shift = kb_input.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
@@ -158,6 +188,8 @@ fn input_to_keybind(
         let main_just_pressed = match bind_val.kind {
             KeyBindKind::Keyboard(key_code) => kb_input.just_pressed(key_code),
             KeyBindKind::Mouse(mouse_button) => mouse_input.just_pressed(mouse_button),
+            KeyBindKind::ScrollUp => last_scroll.is_some_and(|scroll| scroll.y > 0.0),
+            KeyBindKind::ScrollDown => last_scroll.is_some_and(|scroll| scroll.y < 0.0),
         };
         if ctrl == bind_val.ctrl
             && shift == bind_val.shift
@@ -170,6 +202,8 @@ fn input_to_keybind(
         let main_just_released = match bind_val.kind {
             KeyBindKind::Keyboard(key_code) => kb_input.just_released(key_code),
             KeyBindKind::Mouse(mouse_button) => mouse_input.just_released(mouse_button),
+            KeyBindKind::ScrollUp => last_scroll.is_none(),
+            KeyBindKind::ScrollDown => last_scroll.is_none(),
         };
         if main_just_released {
             bind_input.release(*keybind);

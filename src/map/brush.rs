@@ -34,38 +34,36 @@ impl BrushBounds {
     }
 
     pub fn sides(&self) -> Vec<BrushSide> {
-        let center = self.center();
-        let size = self.size();
-        let half_size = size / 2.0;
+        let half_size = self.size() / 2.0;
         vec![
             // X-
             BrushSide {
-                pos: Vec3::new(self.start.x, center.y, center.z),
+                pos: Vec3::new(-half_size.x, 0.0, 0.0),
                 plane: Plane3d::new(Vec3::NEG_X, Vec2::new(half_size.y, half_size.z)),
             },
             // X+
             BrushSide {
-                pos: Vec3::new(self.end.x, center.y, center.z),
+                pos: Vec3::new(half_size.x, 0.0, 0.0),
                 plane: Plane3d::new(Vec3::X, Vec2::new(half_size.y, half_size.z)),
             },
             // Z-
             BrushSide {
-                pos: Vec3::new(center.x, center.y, self.start.z),
+                pos: Vec3::new(0.0, 0.0, -half_size.z),
                 plane: Plane3d::new(Vec3::NEG_Z, Vec2::new(half_size.x, half_size.y)),
             },
             // Z+
             BrushSide {
-                pos: Vec3::new(center.x, center.y, self.end.z),
+                pos: Vec3::new(0.0, 0.0, half_size.z),
                 plane: Plane3d::new(Vec3::Z, Vec2::new(half_size.x, half_size.y)),
             },
             // Y-
             BrushSide {
-                pos: Vec3::new(center.x, self.start.y, center.z),
+                pos: Vec3::new(0.0, -half_size.y, 0.0),
                 plane: Plane3d::new(Vec3::NEG_Y, Vec2::new(half_size.x, half_size.z)),
             },
             // Y+
             BrushSide {
-                pos: Vec3::new(center.x, self.end.y, center.z),
+                pos: Vec3::new(0.0, half_size.y, 0.0),
                 plane: Plane3d::new(Vec3::Y, Vec2::new(half_size.x, half_size.z)),
             },
         ]

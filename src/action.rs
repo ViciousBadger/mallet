@@ -20,8 +20,20 @@ pub struct BuildBrushProcess {
     pub start: Vec3,
 }
 
+#[derive(Default, Reflect, GizmoConfigGroup)]
+struct ActionGizmos {}
+
 pub fn plugin(app: &mut App) {
     app.init_state::<EditorAction>()
+        .insert_gizmo_config(
+            ActionGizmos {},
+            GizmoConfig {
+                line_width: 3.0,
+                line_style: GizmoLineStyle::Dotted,
+                depth_bias: -0.015,
+                ..default()
+            },
+        )
         .add_systems(
             Update,
             (
@@ -41,11 +53,11 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnEnter(EditorAction::None), any_action_cleanup);
 }
 
-pub fn cancel_action(mut next_editor_action: ResMut<NextState<EditorAction>>) {
+fn cancel_action(mut next_editor_action: ResMut<NextState<EditorAction>>) {
     next_editor_action.set(EditorAction::None);
 }
 
-pub fn start_building_brush_here(
+fn start_building_brush_here(
     sel: Res<Sel>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
     mut commands: Commands,
@@ -56,11 +68,10 @@ pub fn start_building_brush_here(
     });
 }
 
-pub fn end_building_brush_here(
+fn end_building_brush_here(
     process: Res<BuildBrushProcess>,
     sel: Res<Sel>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
-    mut commands: Commands,
     mut new_map_node_events: EventWriter<CreateNewMapNode>,
 ) {
     let start = process.start;
@@ -74,7 +85,11 @@ pub fn end_building_brush_here(
     }
 }
 
-pub fn build_brush_draw_gizmos(process: Res<BuildBrushProcess>, sel: Res<Sel>, mut gizmos: Gizmos) {
+fn build_brush_draw_gizmos(
+    process: Res<BuildBrushProcess>,
+    sel: Res<Sel>,
+    mut gizmos: Gizmos<ActionGizmos>,
+) {
     let start = process.start;
     let end = sel.position;
     let bounds = BrushBounds::new(start, end);
@@ -92,10 +107,10 @@ pub fn build_brush_draw_gizmos(process: Res<BuildBrushProcess>, sel: Res<Sel>, m
     gizmos.cuboid(transform, color);
 }
 
-pub fn build_brush_cleanup(mut commands: Commands) {
+fn build_brush_cleanup(mut commands: Commands) {
     commands.remove_resource::<BuildBrushProcess>();
 }
 
-pub fn any_action_cleanup(mut next_sel_mode: ResMut<NextState<SelMode>>) {
-    next_sel_mode.set(SelMode::Normal);
+fn any_action_cleanup(mut next_sel_mode: ResMut<NextState<SelMode>>) {
+    // next_sel_mode.set(SelMode::Normal);
 }
