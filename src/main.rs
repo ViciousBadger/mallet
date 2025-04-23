@@ -1,17 +1,14 @@
-mod app_data;
+mod core;
 mod editor;
 mod game;
-mod input_binding;
-mod map;
 mod util;
-mod view;
 
 use avian3d::PhysicsPlugins;
 use bevy::{app::AppExit, input::common_conditions::input_just_pressed, prelude::*};
 use color_eyre::eyre::Result;
-use input_binding::{Binding, InputBindingSystem};
+use core::input_binding::{Binding, InputBindingSystem};
+use core::view::Gimbal;
 use util::IdGen;
-use view::Gimbal;
 
 pub const APP_NAME: &'static str = "Mallet";
 
@@ -27,12 +24,9 @@ fn main() -> Result<()> {
 
     App::new()
         .add_plugins((
-            app_data::plugin,
+            core::plugin,
             DefaultPlugins,
             PhysicsPlugins::default(),
-            input_binding::plugin,
-            view::plugin,
-            map::plugin,
             editor::plugin,
             game::plugin,
         ))
