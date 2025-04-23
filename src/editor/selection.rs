@@ -10,8 +10,8 @@ use bevy::{
 };
 
 use crate::{
+    core::input_binding::{Binding, InputBindingSystem},
     editor::freelook::FreelookState,
-    input_binding::{Binding, InputBindingSystem},
     util::input_just_toggled,
 };
 

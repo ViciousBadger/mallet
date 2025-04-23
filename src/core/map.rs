@@ -1,6 +1,9 @@
 pub mod brush;
 
-use crate::{app_data::AppDataPath, input_binding::InputBindingSystem, util::IdGen};
+use crate::{
+    core::{app_data::AppDataPath, input_binding::InputBindingSystem},
+    util::IdGen,
+};
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
     input::common_conditions::input_just_released,

@@ -1,15 +1,14 @@
 use bevy::{
-    input::{
-        common_conditions::{input_just_pressed, input_just_released},
-        mouse::MouseMotion,
-    },
+    input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
 };
 
 use crate::{
-    input_binding::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem},
+    core::{
+        input_binding::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem},
+        view::Gimbal,
+    },
     util::{enter_state, grab_mouse, release_mouse},
-    view::Gimbal,
 };
 
 #[derive(Component)]

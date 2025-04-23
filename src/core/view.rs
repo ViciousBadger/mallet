@@ -1,10 +1,8 @@
-use std::f32::consts::PI;
-
 use bevy::{input::mouse::MouseMotion, prelude::*};
 
 use crate::{
+    core::input_binding::{BindingAxis, BindingAxisFns, InputBindingSystem},
     editor::freelook::FreelookState,
-    input_binding::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem, InputBindings},
     AppState,
 };
 

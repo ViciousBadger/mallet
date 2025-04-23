@@ -1,12 +1,14 @@
 use bevy::{color::palettes::css, input::common_conditions::input_just_pressed, prelude::*};
 
 use crate::{
-    editor::selection::{Sel, SelMode},
-    input_binding::InputBindingSystem,
-    map::{
-        brush::{Brush, BrushBounds},
-        CreateNewMapNode, MapNodeKind,
+    core::{
+        input_binding::InputBindingSystem,
+        map::{
+            brush::{Brush, BrushBounds},
+            CreateNewMapNode, MapNodeKind,
+        },
     },
+    editor::selection::{Sel, SelMode},
 };
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
