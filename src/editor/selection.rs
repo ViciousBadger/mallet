@@ -6,6 +6,7 @@ use bevy::{
         mouse::MouseMotion,
     },
     prelude::*,
+    text::cosmic_text::Editor,
     window::PrimaryWindow,
 };
 
@@ -14,6 +15,8 @@ use crate::{
     editor::freelook::FreelookState,
     util::input_just_toggled,
 };
+
+use super::EditorSystems;
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SelAxis {
@@ -468,24 +471,22 @@ pub fn plugin(app: &mut App) {
                 ),
             )
                 .after(InputBindingSystem)
-                .run_if(in_state(FreelookState::Unlocked)),
+                .run_if(in_state(FreelookState::Unlocked))
+                .in_set(EditorSystems),
         )
         .add_systems(
             Update,
             (
-                select_normal.run_if(in_state(SelMode::Normal).and(on_event::<MouseMotion>)),
-                select_locked.run_if(in_state(SelIsAxisLocked).and(on_event::<MouseMotion>)),
-            )
-                .run_if(in_state(FreelookState::Unlocked)),
-        )
-        // .add_systems(Update, reposition_sel_grid.run_if(on_event::<SelChanged>))
-        .add_systems(
-            PostUpdate,
-            (
-                draw_sel_gizmos,
-                draw_sel_target_gizmos,
                 move_grid_origin_to_camera,
+                (
+                    select_normal.run_if(in_state(SelMode::Normal).and(on_event::<MouseMotion>)),
+                    select_locked.run_if(in_state(SelIsAxisLocked).and(on_event::<MouseMotion>)),
+                )
+                    .run_if(in_state(FreelookState::Unlocked)),
                 find_entites_in_selection.run_if(on_event::<SelChanged>),
-            ),
+                (draw_sel_gizmos, draw_sel_target_gizmos),
+            )
+                .chain()
+                .in_set(EditorSystems),
         );
 }

@@ -15,10 +15,19 @@ pub enum AppState {
     InGame,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct AppStateSwitchConf {
     pub pos: Vec3,
     pub look: Gimbal,
+}
+
+impl Default for AppStateSwitchConf {
+    fn default() -> Self {
+        Self {
+            pos: Vec3::Y * 5.0,
+            look: default(),
+        }
+    }
 }
 
 fn playtest(

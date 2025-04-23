@@ -5,16 +5,20 @@ use bevy::{prelude::*, utils::HashMap};
 /// Inputs bound to application actions.
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum Binding {
+    // Universal
     Quit,
     Playtest,
 
-    // Camera
+    // Movement
     MoveLeft,
     MoveRight,
     MoveBackwards,
     MoveForwards,
     MoveDown,
     MoveUp,
+    Jump,
+
+    // Camera
     LookLeft,
     LookRight,
     LookUp,
@@ -53,7 +57,9 @@ pub trait BindingAxisFns {
 }
 
 impl BindingAxisFns for Axis<BindingAxis> {
-    /// Vector for movement. Forwards is Z-
+    /// Vector for movement.
+    /// X is sideways, Y is up/down, Z is backwards/forwards.
+    /// Remember: forwards is negative Z!
     fn movement_vec(&self) -> Vec3 {
         Vec3::new(
             self.get(BindingAxis::MoveX).unwrap_or(0.0),
@@ -141,9 +147,9 @@ impl BoundInput {
 }
 
 #[derive(Resource, Deref)]
-pub struct InputBindings(HashMap<Binding, BoundInput>);
+pub struct InputBindingMap(HashMap<Binding, BoundInput>);
 
-impl Default for InputBindings {
+impl Default for InputBindingMap {
     fn default() -> Self {
         let mut map = HashMap::<Binding, BoundInput>::new();
 
@@ -155,6 +161,7 @@ impl Default for InputBindings {
         map.insert(Binding::MoveForwards, BoundInput::key(KeyCode::KeyW));
         map.insert(Binding::MoveDown, BoundInput::key(KeyCode::KeyQ));
         map.insert(Binding::MoveUp, BoundInput::key(KeyCode::KeyE));
+        map.insert(Binding::Jump, BoundInput::key(KeyCode::Space));
         map.insert(Binding::LookLeft, BoundInput::key(KeyCode::ArrowLeft));
         map.insert(Binding::LookRight, BoundInput::key(KeyCode::ArrowRight));
         map.insert(Binding::LookDown, BoundInput::key(KeyCode::ArrowDown));
@@ -182,7 +189,7 @@ impl Default for InputBindings {
         );
         map.insert(
             Binding::AxisLockSelected,
-            BoundInput::mouse_button(MouseButton::Middle),
+            BoundInput::mouse_button(MouseButton::Right).with_shift(),
         );
         map.insert(
             Binding::ResetSelAxisOffset,
@@ -193,7 +200,7 @@ impl Default for InputBindings {
         map.insert(Binding::SelNext, BoundInput::scroll_down().with_shift());
         map.insert(Binding::SelPrev, BoundInput::scroll_up().with_shift());
 
-        InputBindings(map)
+        InputBindingMap(map)
     }
 }
 
@@ -208,7 +215,7 @@ fn clear_binding_input(mut binding_input: ResMut<ButtonInput<Binding>>) {
 fn process_binding_input(
     kb_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
-    bind_map: Res<InputBindings>,
+    bind_map: Res<InputBindingMap>,
     mut scroll_input: EventReader<MouseWheel>,
     mut bind_input: ResMut<ButtonInput<Binding>>,
 ) {
@@ -280,7 +287,7 @@ fn binding_input_to_axes(
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<InputBindings>()
+    app.init_resource::<InputBindingMap>()
         .init_resource::<ButtonInput<Binding>>()
         .init_resource::<Axis<BindingAxis>>()
         .configure_sets(PreUpdate, InputBindingSystem.after(InputSystem))
@@ -292,7 +299,7 @@ pub fn plugin(app: &mut App) {
                     .in_set(InputBindingSystem),
                 clear_binding_input
                     .before(process_binding_input)
-                    .run_if(resource_exists_and_changed::<InputBindings>),
+                    .run_if(resource_exists_and_changed::<InputBindingMap>),
             ),
         );
 }

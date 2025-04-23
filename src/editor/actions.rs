@@ -11,6 +11,8 @@ use crate::{
     editor::selection::{Sel, SelMode},
 };
 
+use super::EditorSystems;
+
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EditorAction {
     #[default]
@@ -113,7 +115,8 @@ pub fn plugin(app: &mut App) {
                     not(in_state(EditorAction::None)).and(input_just_pressed(KeyCode::Escape)),
                 ),
             )
-                .after(InputBindingSystem),
+                .after(InputBindingSystem)
+                .in_set(EditorSystems),
         )
         .add_systems(OnExit(EditorAction::BuildBrush), build_brush_cleanup)
         .add_systems(OnEnter(EditorAction::None), any_action_cleanup);

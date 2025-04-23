@@ -11,6 +11,8 @@ use crate::{
     util::{enter_state, grab_mouse, release_mouse},
 };
 
+use super::EditorSystems;
+
 #[derive(Component)]
 #[require(Camera3d, Gimbal)]
 pub struct Freelook {
@@ -87,9 +89,10 @@ pub fn plugin(app: &mut App) {
                 enter_state(FreelookState::Locked).run_if(input_just_pressed(Binding::FlyMode)),
                 enter_state(FreelookState::Unlocked).run_if(input_just_released(Binding::FlyMode)),
             )
-                .after(InputBindingSystem),
+                .after(InputBindingSystem)
+                .in_set(EditorSystems),
         )
-        .add_systems(Update, freelook_movement)
+        .add_systems(Update, freelook_movement.in_set(EditorSystems))
         .add_systems(OnEnter(FreelookState::Locked), grab_mouse)
         .add_systems(
             OnExit(FreelookState::Locked),

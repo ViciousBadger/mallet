@@ -157,8 +157,6 @@ fn create_new_map_nodes(
         let entity = commands.spawn(MapNode { id, name, kind }).id();
         map.node_lookup_table.insert(id, entity);
         deploy_events.send(LiveMapNodeChanged(entity));
-        //let new_node = MapNode { id, name, kind };
-        //map.nodes.insert(new_node.id.clone(), new_node);
     }
 }
 

@@ -33,8 +33,16 @@ fn teardown_editor(_: Commands) {
     //Remove resources etc...
 }
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EditorSystems;
+
 pub fn plugin(app: &mut App) {
     app.add_plugins((freelook::plugin, selection::plugin, actions::plugin))
+        .configure_sets(
+            PreUpdate,
+            EditorSystems.run_if(in_state(AppState::InEditor)),
+        )
+        .configure_sets(Update, EditorSystems.run_if(in_state(AppState::InEditor)))
         .add_systems(OnEnter(AppState::InEditor), init_editor)
         .add_systems(OnExit(AppState::InEditor), teardown_editor);
 }
