@@ -2,7 +2,7 @@ pub mod actions;
 pub mod freelook;
 pub mod selection;
 
-use crate::{AppState, AppStateSwitchConf};
+use crate::core::{AppState, AppStateSwitchConf};
 use bevy::prelude::*;
 use freelook::Freelook;
 

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
 use crate::{
+    core::{AppState, AppStateSwitchConf},
     util::{grab_mouse, release_mouse},
-    AppState, AppStateSwitchConf,
 };
 
 pub fn plugin(app: &mut App) {

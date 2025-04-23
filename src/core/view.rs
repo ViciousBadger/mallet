@@ -3,8 +3,9 @@ use bevy::{input::mouse::MouseMotion, prelude::*};
 use crate::{
     core::input_binding::{BindingAxis, BindingAxisFns, InputBindingSystem},
     editor::freelook::FreelookState,
-    AppState,
 };
+
+use super::AppState;
 
 /// For gimbal-locked rotation.
 /// Pitch=X, Yaw=Y, Roll=Z
