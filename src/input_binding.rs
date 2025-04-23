@@ -15,6 +15,10 @@ pub enum Binding {
     MoveForwards,
     MoveDown,
     MoveUp,
+    LookLeft,
+    LookRight,
+    LookUp,
+    LookDown,
     FlyMode,
     FlySpeedUp,
     FlySpeedDown,
@@ -116,6 +120,10 @@ impl Default for InputBindings {
         map.insert(Binding::MoveForwards, BoundInput::key(KeyCode::KeyW));
         map.insert(Binding::MoveDown, BoundInput::key(KeyCode::KeyQ));
         map.insert(Binding::MoveUp, BoundInput::key(KeyCode::KeyE));
+        map.insert(Binding::LookLeft, BoundInput::key(KeyCode::ArrowLeft));
+        map.insert(Binding::LookRight, BoundInput::key(KeyCode::ArrowRight));
+        map.insert(Binding::LookDown, BoundInput::key(KeyCode::ArrowDown));
+        map.insert(Binding::LookUp, BoundInput::key(KeyCode::ArrowUp));
         map.insert(
             Binding::FlyMode,
             BoundInput::mouse_button(MouseButton::Right),
