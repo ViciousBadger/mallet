@@ -1,3 +1,4 @@
+mod app_data;
 mod core;
 mod editor;
 mod game;
@@ -14,9 +15,10 @@ fn main() -> Result<()> {
 
     App::new()
         .add_plugins((
-            core::plugin,
+            app_data::plugin,
             DefaultPlugins,
             PhysicsPlugins::default(),
+            core::plugin,
             editor::plugin,
             game::plugin,
         ))

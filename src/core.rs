@@ -1,4 +1,3 @@
-pub mod app_data;
 pub mod input_binding;
 pub mod map;
 pub mod view;
@@ -47,21 +46,16 @@ fn exit_app(mut exit_events: ResMut<Events<AppExit>>) {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((
-        app_data::plugin,
-        input_binding::plugin,
-        view::plugin,
-        map::plugin,
-    ))
-    .init_resource::<IdGen>()
-    .init_state::<AppState>()
-    .enable_state_scoped_entities::<AppState>()
-    .add_systems(
-        PreUpdate,
-        (
-            exit_app.run_if(input_just_pressed(Binding::Quit)),
-            playtest.run_if(input_just_pressed(Binding::Playtest)),
-        )
-            .after(InputBindingSystem),
-    );
+    app.add_plugins((input_binding::plugin, view::plugin, map::plugin))
+        .init_resource::<IdGen>()
+        .init_state::<AppState>()
+        .enable_state_scoped_entities::<AppState>()
+        .add_systems(
+            PreUpdate,
+            (
+                exit_app.run_if(input_just_pressed(Binding::Quit)),
+                playtest.run_if(input_just_pressed(Binding::Playtest)),
+            )
+                .after(InputBindingSystem),
+        );
 }

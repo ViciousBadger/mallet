@@ -1,9 +1,6 @@
 pub mod brush;
 
-use crate::{
-    core::{app_data::AppDataPath, input_binding::InputBindingSystem},
-    util::IdGen,
-};
+use crate::{app_data::AppDataPath, core::input_binding::InputBindingSystem, util::IdGen};
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
     input::common_conditions::input_just_released,
@@ -69,7 +66,7 @@ impl MapNodeKind {
 pub struct CreateNewMapNode(pub MapNodeKind);
 
 #[derive(Event)]
-pub struct DeployMapNode(Entity);
+pub struct LiveMapNodeChanged(Entity);
 
 pub const MAP_FILE_EXT: &str = "mmap";
 pub const DEFAULT_MAP_NAME: &str = "map";
@@ -104,7 +101,7 @@ fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
 fn insert_map_when_loaded(
     mut loading_map: ResMut<LoadingMap>,
     mut commands: Commands,
-    mut deploy_events: EventWriter<DeployMapNode>,
+    mut changed_events: EventWriter<LiveMapNodeChanged>,
 ) {
     if let Some(map) = block_on(future::poll_once(&mut loading_map.task)) {
         commands.remove_resource::<LoadingMap>();
@@ -112,7 +109,7 @@ fn insert_map_when_loaded(
         for node in map.nodes {
             let node_id = node.id;
             let entity = commands.spawn(node).id();
-            deploy_events.send(DeployMapNode(entity));
+            changed_events.send(LiveMapNodeChanged(entity));
             live_map.node_lookup_table.insert(node_id, entity);
         }
         commands.insert_resource(live_map);
@@ -147,7 +144,7 @@ fn create_new_map_nodes(
     mut id_gen: ResMut<IdGen>,
     mut create_node_events: EventReader<CreateNewMapNode>,
     mut map: ResMut<LiveGameMap>,
-    mut deploy_events: EventWriter<DeployMapNode>,
+    mut deploy_events: EventWriter<LiveMapNodeChanged>,
     mut commands: Commands,
 ) {
     for event in create_node_events.read() {
@@ -159,7 +156,7 @@ fn create_new_map_nodes(
 
         let entity = commands.spawn(MapNode { id, name, kind }).id();
         map.node_lookup_table.insert(id, entity);
-        deploy_events.send(DeployMapNode(entity));
+        deploy_events.send(LiveMapNodeChanged(entity));
         //let new_node = MapNode { id, name, kind };
         //map.nodes.insert(new_node.id.clone(), new_node);
     }
@@ -177,16 +174,15 @@ fn remove_despawned_entites_from_lookup_table(
 
 fn deploy_nodes(
     q_live_nodes: Query<&MapNode>,
-    mut deploy_events: EventReader<DeployMapNode>,
+    mut changed_events: EventReader<LiveMapNodeChanged>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for event in deploy_events.read() {
+    for event in changed_events.read() {
         let node_entity_id = event.0;
 
         let live_node = q_live_nodes.get(node_entity_id).unwrap();
-        info!("deployment of {}", live_node.id);
 
         let mut entity_commands = commands.entity(node_entity_id);
         entity_commands.retain::<MapNode>();
@@ -256,5 +252,5 @@ pub fn plugin(app: &mut App) {
             ),
         )
         .add_event::<CreateNewMapNode>()
-        .add_event::<DeployMapNode>();
+        .add_event::<LiveMapNodeChanged>();
 }
