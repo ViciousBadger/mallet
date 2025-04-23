@@ -71,8 +71,8 @@ pub struct CreateNewMapNode(pub MapNodeKind);
 #[derive(Event)]
 pub struct DeployMapNode(Entity);
 
-pub const MAP_FILE_EXT: &'static str = "mmap";
-pub const DEFAULT_MAP_NAME: &'static str = "map";
+pub const MAP_FILE_EXT: &str = "mmap";
+pub const DEFAULT_MAP_NAME: &str = "map";
 
 pub fn default_map_filename() -> String {
     format!("{}.{}", DEFAULT_MAP_NAME, MAP_FILE_EXT)
@@ -110,7 +110,7 @@ fn insert_map_when_loaded(
         commands.remove_resource::<LoadingMap>();
         let mut live_map = LiveGameMap::new(loading_map.path.clone());
         for node in map.nodes {
-            let node_id = node.id.clone();
+            let node_id = node.id;
             let entity = commands.spawn(node).id();
             deploy_events.send(DeployMapNode(entity));
             live_map.node_lookup_table.insert(node_id, entity);

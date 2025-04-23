@@ -104,7 +104,7 @@ impl ComputedStates for SelIsAxisLocked {
     type SourceStates = SelMode;
 
     fn compute(sources: Self::SourceStates) -> Option<Self> {
-        sources.is_axis_locked().then(|| SelIsAxisLocked)
+        sources.is_axis_locked().then_some(SelIsAxisLocked)
     }
 }
 
@@ -363,15 +363,14 @@ fn find_entites_in_selection(
 
     if inter.is_empty() {
         sel_target.primary = None;
-    } else {
-        if let Some(existing_prim) = sel_target.primary {
-            if !inter.contains(&existing_prim) {
-                sel_target.primary = Some(inter[0]);
-            }
-        } else {
+    } else if let Some(existing_prim) = sel_target.primary {
+        if !inter.contains(&existing_prim) {
             sel_target.primary = Some(inter[0]);
         }
+    } else {
+        sel_target.primary = Some(inter[0]);
     }
+
     sel_target.intersecting = inter;
 }
 

@@ -10,7 +10,7 @@ use core::input_binding::{Binding, InputBindingSystem};
 use core::view::Gimbal;
 use util::IdGen;
 
-pub const APP_NAME: &'static str = "Mallet";
+pub const APP_NAME: &str = "Mallet";
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AppState {
