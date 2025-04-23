@@ -11,6 +11,7 @@ avian3d = "0.2.1"
 bevy = { version = "0.15.3", features = ["wayland"] }
 color-eyre = "0.6.3"
 directories = "6.0.0"
+itertools = "0.14.0"
 postcard = { version = "1.1.1", features = ["use-std"] }
 rand = "0.9.1"
 ron = "0.10.1"

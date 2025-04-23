@@ -16,6 +16,9 @@ pub struct Gimbal {
     pub roll: f32,
 }
 
+#[derive(Component)]
+pub struct GimbalRotatesParent;
+
 const PITCH_LIMIT: f32 = 88.0_f32.to_radians();
 
 // impl Gimbal {
@@ -55,14 +58,35 @@ fn gimbal_limit(mut q_gimbal: Query<&mut Gimbal, Changed<Gimbal>>) {
     }
 }
 
-fn gimbal_rotation(mut q_gimbal_changed: Query<(&Gimbal, &mut Transform), Changed<Gimbal>>) {
-    for (gimbal, mut transform) in q_gimbal_changed.iter_mut() {
+fn gimbal_rotation(
+    mut q_gimbal_changed: Query<
+        (&Gimbal, &mut Transform, Has<GimbalRotatesParent>),
+        Changed<Gimbal>,
+    >,
+) {
+    for (gimbal, mut transform, should_rotate_parent) in q_gimbal_changed.iter_mut() {
         transform.rotation = Quat::from_euler(
             EulerRot::YXZ,
-            -gimbal.pitch_yaw.y,
+            if should_rotate_parent {
+                0.0
+            } else {
+                -gimbal.pitch_yaw.y
+            },
             -gimbal.pitch_yaw.x,
             gimbal.roll,
         )
+    }
+}
+
+fn gimbal_parent_rotation(
+    q_gimbal_changed: Query<(&Gimbal, &Parent), (Changed<Gimbal>, With<GimbalRotatesParent>)>,
+    mut q_transforms: Query<&mut Transform, Without<GimbalRotatesParent>>, // ensure parallel compability
+) {
+    for (gimbal, parent) in q_gimbal_changed.iter() {
+        if let Ok(mut parent_transform) = q_transforms.get_mut(parent.get()) {
+            parent_transform.rotation =
+                Quat::from_euler(EulerRot::YXZ, -gimbal.pitch_yaw.y, 0.0, 0.0)
+        }
     }
 }
 
@@ -80,5 +104,5 @@ pub fn plugin(app: &mut App) {
             .chain()
             .after(InputBindingSystem),
     )
-    .add_systems(Update, gimbal_rotation);
+    .add_systems(Update, (gimbal_rotation, gimbal_parent_rotation));
 }

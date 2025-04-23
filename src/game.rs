@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use crate::{
     core::{
         input_binding::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem},
+        view::GimbalRotatesParent,
         AppState, AppStateSwitchConf,
     },
     util::{grab_mouse, release_mouse},
@@ -55,8 +56,12 @@ fn update_grounded(
     }
 }
 
+const ACCEL: f32 = 70.0;
+const TOP_SPEED: f32 = 7.0;
+const GRAV: f32 = 9.81 * 2.0;
+
 fn apply_gravity(time: Res<Time>, mut q_actors: Query<&mut LinearVelocity, With<PlayerActor>>) {
-    let gravity = Vec3::NEG_Y * 9.81 * 2.0;
+    let gravity = Vec3::NEG_Y * GRAV;
     for mut linear_velocity in &mut q_actors.iter_mut() {
         linear_velocity.0 += gravity * time.delta_secs();
     }
@@ -65,18 +70,20 @@ fn apply_gravity(time: Res<Time>, mut q_actors: Query<&mut LinearVelocity, With<
 fn movement(
     time: Res<Time>,
     mut movement_event_reader: EventReader<MovementAction>,
-    mut controllers: Query<(&mut LinearVelocity, Has<Grounded>)>,
+    mut controllers: Query<(&GlobalTransform, &mut LinearVelocity, Has<Grounded>)>,
 ) {
     let delta_time = time.delta_secs();
-    let move_accel = 30.0;
     let jump_impulse = 7.0;
 
     for event in movement_event_reader.read() {
-        for (mut linear_velocity, is_grounded) in &mut controllers {
+        for (transform, mut linear_velocity, is_grounded) in &mut controllers {
             match event {
                 MovementAction::Move(direction) => {
-                    linear_velocity.x += direction.x * move_accel * delta_time;
-                    linear_velocity.z -= direction.y * move_accel * delta_time;
+                    let rot = Rot2::radians(-transform.rotation().to_euler(EulerRot::YXZ).0);
+                    let rotated_dir = rot * *direction;
+
+                    linear_velocity.x += rotated_dir.x * ACCEL * delta_time;
+                    linear_velocity.z += rotated_dir.y * ACCEL * delta_time;
                 }
                 MovementAction::Jump => {
                     if is_grounded {
@@ -88,11 +95,28 @@ fn movement(
     }
 }
 
-fn apply_movement_damping(mut query: Query<&mut LinearVelocity, With<PlayerActor>>) {
-    let damping_factor = 0.92;
-    for mut linear_velocity in query.iter_mut() {
-        linear_velocity.x *= damping_factor;
-        linear_velocity.z *= damping_factor;
+fn apply_movement_damping(
+    time: Res<Time>,
+    mut movement_event_reader: EventReader<MovementAction>,
+    mut q_actors: Query<&mut LinearVelocity, With<PlayerActor>>,
+) {
+    let moving = movement_event_reader
+        .read()
+        .any(|event| matches!(event, MovementAction::Move(..)));
+
+    for mut linear_velocity in q_actors.iter_mut() {
+        let dampened = linear_velocity
+            .move_towards(
+                Vec3::ZERO,
+                if moving {
+                    0.0
+                } else {
+                    time.delta_secs() * ACCEL
+                },
+            )
+            .clamp_length_max(TOP_SPEED);
+
+        **linear_velocity = Vec3::new(dampened.x, linear_velocity.y, dampened.z);
     }
 }
 /// Kinematic bodies do not get pushed by collisions by default,
@@ -291,6 +315,7 @@ fn init_game(mut commands: Commands, init_conf: Option<Res<AppStateSwitchConf>>)
                 ..default()
             }),
             conf.look.clone(),
+            GimbalRotatesParent,
         ))
         .set_parent(player);
 

@@ -1,6 +1,7 @@
 use bevy::input::mouse::MouseWheel;
 use bevy::input::InputSystem;
 use bevy::{prelude::*, utils::HashMap};
+use itertools::Itertools;
 
 /// Inputs bound to application actions.
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
@@ -79,6 +80,7 @@ impl BindingAxisFns for Axis<BindingAxis> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct BoundInput {
     pub source: BoundInputSource,
     pub ctrl: bool,
@@ -86,6 +88,7 @@ pub struct BoundInput {
     pub alt: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BoundInputSource {
     Keyboard(KeyCode),
     Mouse(MouseButton),
@@ -94,6 +97,29 @@ pub enum BoundInputSource {
 }
 
 impl BoundInput {
+    pub fn modifier_permutations(&self) -> Vec<BoundInput> {
+        // cant figure out how to use this well
+        vec![
+            (false, false, false),
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+            (true, true, false),
+            (false, true, true),
+            (true, false, true),
+            (true, true, true),
+        ]
+        .into_iter()
+        .map(|(ctrl, shift, alt)| BoundInput {
+            source: self.source.clone(),
+            ctrl,
+            shift,
+            alt,
+        })
+        .filter(|bound| bound != self)
+        .collect()
+    }
+
     pub fn key(keycode: KeyCode) -> Self {
         Self {
             source: BoundInputSource::Keyboard(keycode),
@@ -103,7 +129,7 @@ impl BoundInput {
         }
     }
 
-    pub fn mouse_button(button: MouseButton) -> Self {
+    pub fn mouse(button: MouseButton) -> Self {
         Self {
             source: BoundInputSource::Mouse(button),
             ctrl: false,
@@ -166,10 +192,7 @@ impl Default for InputBindingMap {
         map.insert(Binding::LookRight, BoundInput::key(KeyCode::ArrowRight));
         map.insert(Binding::LookDown, BoundInput::key(KeyCode::ArrowDown));
         map.insert(Binding::LookUp, BoundInput::key(KeyCode::ArrowUp));
-        map.insert(
-            Binding::FlyMode,
-            BoundInput::mouse_button(MouseButton::Right),
-        );
+        map.insert(Binding::FlyMode, BoundInput::mouse(MouseButton::Right));
         map.insert(Binding::FlySpeedUp, BoundInput::scroll_up());
         map.insert(Binding::FlySpeedDown, BoundInput::scroll_down());
         map.insert(Binding::SetSelAxisX, BoundInput::key(KeyCode::KeyX));
@@ -189,7 +212,7 @@ impl Default for InputBindingMap {
         );
         map.insert(
             Binding::AxisLockSelected,
-            BoundInput::mouse_button(MouseButton::Right).with_shift(),
+            BoundInput::mouse(MouseButton::Right).with_shift(),
         );
         map.insert(
             Binding::ResetSelAxisOffset,
@@ -224,33 +247,37 @@ fn process_binding_input(
     // Collect scroll events.
     let last_scroll = scroll_input.read().last();
 
-    for (bind, bind_val) in bind_map.iter() {
+    for (binding, bound_input) in bind_map.iter() {
         let ctrl = kb_input.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
         let shift = kb_input.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
         let alt = kb_input.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
 
-        let main_just_pressed = match bind_val.source {
+        let main_just_pressed = match bound_input.source {
             BoundInputSource::Keyboard(key_code) => kb_input.just_pressed(key_code),
             BoundInputSource::Mouse(mouse_button) => mouse_input.just_pressed(mouse_button),
             BoundInputSource::ScrollUp => last_scroll.is_some_and(|scroll| scroll.y > 0.0),
             BoundInputSource::ScrollDown => last_scroll.is_some_and(|scroll| scroll.y < 0.0),
         };
-        if ctrl == bind_val.ctrl
-            && shift == bind_val.shift
-            && alt == bind_val.alt
+        if ctrl == bound_input.ctrl
+            && shift == bound_input.shift
+            && alt == bound_input.alt
             && main_just_pressed
         {
-            bind_input.press(*bind);
+            bind_input.press(*binding);
         }
 
-        let main_just_released = match bind_val.source {
+        let main_just_released = match bound_input.source {
             BoundInputSource::Keyboard(key_code) => kb_input.just_released(key_code),
             BoundInputSource::Mouse(mouse_button) => mouse_input.just_released(mouse_button),
             BoundInputSource::ScrollUp => last_scroll.is_none(),
             BoundInputSource::ScrollDown => last_scroll.is_none(),
         };
+
+        // TODO: Maybe itshould release for example W when Shift+W is now pressed (so cancel
+        // eariler presses of same key but different modifiers)
+        // When pressing binding, find all permutations of same source and release..
         if main_just_released {
-            bind_input.release(*bind);
+            bind_input.release(*binding);
         }
     }
 }
