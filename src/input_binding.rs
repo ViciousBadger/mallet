@@ -38,6 +38,41 @@ pub enum Binding {
     SelPrev,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum BindingAxis {
+    MoveX,
+    MoveY,
+    MoveZ,
+    LookX,
+    LookY,
+}
+
+pub trait BindingAxisFns {
+    fn movement_vec(&self) -> Vec3;
+    fn look_vec(&self) -> Vec2;
+}
+
+impl BindingAxisFns for Axis<BindingAxis> {
+    /// Vector for movement. Forwards is Z-
+    fn movement_vec(&self) -> Vec3 {
+        Vec3::new(
+            self.get(BindingAxis::MoveX).unwrap_or(0.0),
+            self.get(BindingAxis::MoveY).unwrap_or(0.0),
+            self.get(BindingAxis::MoveZ).unwrap_or(0.0),
+        )
+        .normalize_or_zero()
+    }
+
+    /// Vector for looking. X = yaw, Y = pitch
+    fn look_vec(&self) -> Vec2 {
+        Vec2::new(
+            self.get(BindingAxis::LookX).unwrap_or(0.0),
+            self.get(BindingAxis::LookY).unwrap_or(0.0),
+        )
+        .normalize_or_zero()
+    }
+}
+
 pub struct BoundInput {
     pub source: BoundInputSource,
     pub ctrl: bool,
@@ -177,7 +212,7 @@ fn process_binding_input(
     mut scroll_input: EventReader<MouseWheel>,
     mut bind_input: ResMut<ButtonInput<Binding>>,
 ) {
-    bind_input.clear();
+    bind_input.bypass_change_detection().clear();
 
     // Collect scroll events.
     let last_scroll = scroll_input.read().last();
@@ -213,14 +248,48 @@ fn process_binding_input(
     }
 }
 
+fn binding_input_to_axes(
+    bind_input: Res<ButtonInput<Binding>>,
+    mut axis_input: ResMut<Axis<BindingAxis>>,
+) {
+    axis_input.set(
+        BindingAxis::MoveX,
+        f32::from(bind_input.pressed(Binding::MoveRight))
+            - f32::from(bind_input.pressed(Binding::MoveLeft)),
+    );
+    axis_input.set(
+        BindingAxis::MoveY,
+        f32::from(bind_input.pressed(Binding::MoveUp))
+            - f32::from(bind_input.pressed(Binding::MoveDown)),
+    );
+    axis_input.set(
+        BindingAxis::MoveZ,
+        f32::from(bind_input.pressed(Binding::MoveBackwards))
+            - f32::from(bind_input.pressed(Binding::MoveForwards)),
+    );
+    axis_input.set(
+        BindingAxis::LookX,
+        f32::from(bind_input.pressed(Binding::LookRight))
+            - f32::from(bind_input.pressed(Binding::LookLeft)),
+    );
+    axis_input.set(
+        BindingAxis::LookY,
+        f32::from(bind_input.pressed(Binding::LookUp))
+            - f32::from(bind_input.pressed(Binding::LookDown)),
+    );
+}
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<InputBindings>()
         .init_resource::<ButtonInput<Binding>>()
+        .init_resource::<Axis<BindingAxis>>()
         .configure_sets(PreUpdate, InputBindingSystem.after(InputSystem))
         .add_systems(
             PreUpdate,
             (
-                process_binding_input.in_set(InputBindingSystem),
+                (process_binding_input, binding_input_to_axes)
+                    .chain()
+                    .in_set(InputBindingSystem),
                 clear_binding_input
                     .before(process_binding_input)
                     .run_if(resource_exists_and_changed::<InputBindings>),

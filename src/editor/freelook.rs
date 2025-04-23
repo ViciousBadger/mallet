@@ -7,7 +7,7 @@ use bevy::{
 };
 
 use crate::{
-    input_binding::{Binding, InputBindingSystem},
+    input_binding::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem},
     util::{enter_state, grab_mouse, release_mouse},
     view::Gimbal,
 };
@@ -37,30 +37,9 @@ pub enum FreelookState {
     Locked,
 }
 
-fn freelook_input(mut q_freelook: Query<&mut Freelook>, input: Res<ButtonInput<Binding>>) {
+fn freelook_input(input: Res<Axis<BindingAxis>>, mut q_freelook: Query<&mut Freelook>) {
     if let Ok(mut freelook) = q_freelook.get_single_mut() {
-        let mut raw_move = Vec3::ZERO;
-
-        if input.pressed(Binding::MoveForwards) {
-            raw_move -= Vec3::Z
-        }
-        if input.pressed(Binding::MoveLeft) {
-            raw_move -= Vec3::X
-        }
-        if input.pressed(Binding::MoveBackwards) {
-            raw_move += Vec3::Z
-        }
-        if input.pressed(Binding::MoveRight) {
-            raw_move += Vec3::X
-        }
-        if input.pressed(Binding::MoveDown) {
-            raw_move -= Vec3::Y
-        }
-        if input.pressed(Binding::MoveUp) {
-            raw_move += Vec3::Y
-        }
-
-        freelook.target_move = raw_move.normalize_or_zero();
+        freelook.target_move = input.movement_vec();
     }
 }
 

@@ -4,7 +4,7 @@ use bevy::{input::mouse::MouseMotion, prelude::*};
 
 use crate::{
     editor::freelook::FreelookState,
-    input_binding::{Binding, InputBindingSystem, InputBindings},
+    input_binding::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem, InputBindings},
     AppState,
 };
 
@@ -40,25 +40,13 @@ fn gimbal_mouse_input(
 }
 
 fn gimbal_binding_input(
-    input: Res<ButtonInput<Binding>>,
+    input: Res<Axis<BindingAxis>>,
     time: Res<Time>,
     mut q_gimbal: Query<&mut Gimbal>,
 ) {
-    let mut look_vec = Vec2::ZERO;
     if let Ok(mut gimbal) = q_gimbal.get_single_mut() {
-        if input.pressed(Binding::LookLeft) {
-            look_vec -= Vec2::X
-        }
-        if input.pressed(Binding::LookRight) {
-            look_vec += Vec2::X
-        }
-        if input.pressed(Binding::LookDown) {
-            look_vec += Vec2::Y
-        }
-        if input.pressed(Binding::LookUp) {
-            look_vec -= Vec2::Y
-        }
-        gimbal.pitch_yaw += look_vec.yx() * time.delta_secs() * 1.5;
+        let look_vec = input.look_vec();
+        gimbal.pitch_yaw += Vec2::new(-look_vec.y, look_vec.x) * time.delta_secs() * 1.5;
     }
 }
 
