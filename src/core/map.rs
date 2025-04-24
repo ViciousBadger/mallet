@@ -3,7 +3,6 @@ pub mod brush;
 use crate::{app_data::AppDataPath, core::input_binding::InputBindingSystem, util::IdGen};
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
-    core_pipeline::post_process::PostProcessingNode,
     input::common_conditions::input_just_released,
     prelude::*,
     tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
@@ -18,6 +17,57 @@ use ulid::{serde::ulid_as_u128, Ulid};
 use wyrand::WyRand;
 
 use super::view::{Gimbal, TeleportGimbalCamera};
+
+// testing grounds
+
+#[derive(Resource, Default)]
+pub struct LiveMap {
+    pub nodes: HashMap<Ulid, MapNode>,
+    pub graph_idx: u32,
+}
+
+#[derive(Resource, Deref)]
+pub struct MapActionGraph(Graph<MapAction, ()>);
+
+impl LiveMap {
+    pub fn apply(&mut self, action: MapAction) {
+        match action {
+            MapAction::Init => {}
+            MapAction::AddNode { id, node } => {
+                self.nodes.insert(id, node.clone());
+            }
+            MapAction::ModifyNode { before, after } => todo!(),
+            MapAction::RemoveNode(ulid) => todo!(),
+        }
+    }
+
+    pub fn undo(&mut self, action: MapAction) {
+        match action {
+            MapAction::Init => {}
+            MapAction::AddNode { id, node } => todo!(),
+            MapAction::ModifyNode { before, after } => todo!(),
+            MapAction::RemoveNode(ulid) => todo!(),
+        }
+    }
+}
+
+impl MapActionGraph {
+    pub fn new() -> Self {
+        let mut g: Graph<MapAction, ()> = Graph::new();
+        g.add_node(MapAction::Init);
+        Self(g)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum MapAction {
+    Init,
+    AddNode { id: Ulid, node: MapNode },
+    ModifyNode { before: MapNode, after: MapNode },
+    RemoveNode(Ulid),
+}
+
+// tesiting end
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct StoredGameMap {
@@ -49,19 +99,6 @@ impl LiveGameMap {
             node_lookup_table: default(),
         }
     }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct WorldMap {
-    pub nodes: Vec<MapNode>,
-    pub tree: Graph<MapAction, ()>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub enum MapAction {
-    AddNode(MapNode),
-    ModifyNode(MapNode),
-    RemoveNode(Ulid),
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
