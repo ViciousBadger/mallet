@@ -1,9 +1,9 @@
-pub mod input_binding;
+pub mod binds;
 pub mod map;
 pub mod view;
 
 use bevy::{input::common_conditions::input_just_pressed, prelude::*};
-use input_binding::{Binding, InputBindingSystem};
+use binds::{Binding, InputBindingSystem};
 use view::{Gimbal, GimbalPos};
 
 use crate::{game::GameRules, util::IdGen};
@@ -42,7 +42,7 @@ fn exit_app(mut exit_events: ResMut<Events<AppExit>>) {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((input_binding::plugin, view::plugin, map::plugin))
+    app.add_plugins((binds::plugin, view::plugin, map::plugin))
         .init_resource::<IdGen>()
         .init_state::<AppState>()
         .enable_state_scoped_entities::<AppState>()

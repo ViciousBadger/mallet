@@ -5,7 +5,7 @@ use bevy::{
 
 use crate::{
     core::{
-        input_binding::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem},
+        binds::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem},
         view::Gimbal,
     },
     util::{enter_state, grab_mouse, release_mouse},

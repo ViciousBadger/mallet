@@ -2,7 +2,7 @@ use bevy::{input::mouse::MouseMotion, prelude::*};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::input_binding::{BindingAxis, BindingAxisFns, InputBindingSystem},
+    core::binds::{BindingAxis, BindingAxisFns, InputBindingSystem},
     editor::freelook::FreelookState,
 };
 

@@ -7,6 +7,7 @@ use bevy::{prelude::*, utils::HashMap};
 pub enum Binding {
     // Universal
     Quit,
+    Save,
     Playtest,
     Undo,
     Redo,
@@ -181,6 +182,7 @@ impl Default for InputBindingMap {
         let mut map = HashMap::<Binding, BoundInput>::new();
 
         map.insert(Binding::Quit, BoundInput::key(KeyCode::KeyQ).with_control());
+        map.insert(Binding::Save, BoundInput::key(KeyCode::KeyS).with_control());
         map.insert(Binding::Playtest, BoundInput::key(KeyCode::Tab));
         map.insert(Binding::Undo, BoundInput::key(KeyCode::KeyZ).with_control());
         map.insert(

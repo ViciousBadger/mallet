@@ -2,7 +2,7 @@ use bevy::{color::palettes::css, input::common_conditions::input_just_pressed, p
 
 use crate::{
     core::{
-        input_binding::InputBindingSystem,
+        binds::InputBindingSystem,
         map::{
             brush::{Brush, BrushBounds},
             MMapDelta, MMapMod, MMapNodeKind,

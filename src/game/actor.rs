@@ -1,4 +1,4 @@
-use crate::core::input_binding::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem};
+use crate::core::binds::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem};
 use avian3d::prelude::{narrow_phase::NarrowPhaseSet, *};
 use bevy::prelude::*;
 

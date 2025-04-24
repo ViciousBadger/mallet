@@ -1,6 +1,6 @@
 pub mod brush;
 
-use crate::{app_data::AppDataPath, core::input_binding::InputBindingSystem, util::IdGen};
+use crate::{app_data::AppDataPath, core::binds::InputBindingSystem, util::IdGen};
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
     input::common_conditions::{input_just_pressed, input_just_released},
@@ -17,7 +17,7 @@ use ulid::{serde::ulid_as_u128, Ulid};
 use wyrand::WyRand;
 
 use super::{
-    input_binding::Binding,
+    binds::Binding,
     view::{Gimbal, GimbalPos, TPCameraTo},
 };
 
@@ -564,6 +564,7 @@ pub fn plugin(app: &mut App) {
                 init_empty_map.run_if(input_just_released(KeyCode::KeyR)),
                 map_undo.run_if(input_just_pressed(Binding::Undo)),
                 map_redo.run_if(input_just_pressed(Binding::Redo)),
+                save_map.run_if(input_just_pressed(Binding::Save)),
             )
                 .after(InputBindingSystem),
         )

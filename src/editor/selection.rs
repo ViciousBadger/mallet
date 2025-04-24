@@ -11,7 +11,7 @@ use bevy::{
 };
 
 use crate::{
-    core::input_binding::{Binding, InputBindingSystem},
+    core::binds::{Binding, InputBindingSystem},
     editor::freelook::FreelookState,
     util::input_just_toggled,
 };
