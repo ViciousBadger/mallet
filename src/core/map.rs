@@ -10,6 +10,7 @@ use bevy::{
     utils::{HashMap, HashSet},
 };
 use brush::Brush;
+use petgraph::{acyclic::Acyclic, Graph};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{fs::File, path::PathBuf};
@@ -48,6 +49,19 @@ impl LiveGameMap {
             node_lookup_table: default(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WorldMap {
+    pub nodes: Vec<MapNode>,
+    pub undo_tree: Graph<MapAction, ()>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum MapAction {
+    AddNode(MapNode),
+    ModifyNode(MapNode),
+    RemoveNode(Ulid),
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
