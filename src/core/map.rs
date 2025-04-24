@@ -8,24 +8,28 @@ use bevy::{
     tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
     utils::{HashMap, HashSet},
 };
+use bimap::{BiBTreeMap, BiHashMap};
 use brush::Brush;
-use color_eyre::owo_colors::OwoColorize;
 use daggy::{Dag, NodeIndex, Walker};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use std::{fs::File, path::PathBuf};
+use std::{collections::BTreeMap, fs::File, path::PathBuf};
 use ulid::{serde::ulid_as_u128, Ulid};
 use wyrand::WyRand;
 
 use super::view::{Gimbal, TeleportGimbalCamera};
 
 // testing grounds
+//
+pub const MAP_FILE_EXT: &str = "mmap";
+pub const DEFAULT_MAP_NAME: &str = "map";
 
 #[derive(Resource, Serialize, Deserialize)]
 pub struct MMap {
-    state: HashMap<MMapId, MMapNode>,
+    state: BTreeMap<MMapId, MMapNode>,
     cur_delta_idx: NodeIndex<u32>,
     delta_graph: Dag<MMapDelta, ()>,
+    pub editor_context: EditorContext,
 }
 
 #[derive(
@@ -36,7 +40,12 @@ pub struct MMapId(#[serde(with = "ulid_as_u128")] Ulid);
 #[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
 pub struct MMapNode {
     pub name: String,
-    pub kind: MapNodeKind,
+    pub kind: MMapNodeKind,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub enum MMapNodeKind {
+    Brush(Brush),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -68,9 +77,10 @@ impl Default for MMap {
         let mut graph: Dag<MMapDelta, ()> = Dag::new();
         let root_node = graph.add_node(MMapDelta::Nop);
         Self {
-            state: HashMap::new(),
+            state: BTreeMap::new(),
             cur_delta_idx: root_node,
             delta_graph: graph,
+            editor_context: EditorContext::default(),
         }
     }
 }
@@ -191,28 +201,55 @@ impl MMapDelta {
     }
 }
 
+impl MMapNodeKind {
+    pub fn name(&self) -> &'static str {
+        match self {
+            MMapNodeKind::Brush(_) => "Brush",
+        }
+    }
+}
+
+#[derive(Resource)]
+pub struct MMapContext {
+    pub save_path: PathBuf,
+    pub node_lookup: BiHashMap<Ulid, Entity>,
+}
+
+/// Relevant editor state stored in the map file.
+#[derive(Serialize, Deserialize, Default)]
+pub struct EditorContext {
+    camera_pos: Vec3,
+    camera_gimbal: Gimbal,
+}
+
+impl MMapContext {
+    pub fn new(save_path: PathBuf) -> Self {
+        Self {
+            save_path,
+            node_lookup: default(),
+        }
+    }
+}
+
+#[derive(Resource)]
+struct LoadingMMap {
+    path: PathBuf,
+    task: Task<MMapLoadResult>,
+}
+
+pub type MMapLoadResult = Result<MMap, postcard::Error>;
+
 // tesiting end
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct StoredGameMap {
     pub nodes: Vec<MapNode>,
-    pub editor: StoredEditorContext,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-pub struct StoredEditorContext {
-    camera_pos: Vec3,
-    camera_gimbal: Gimbal,
+    pub editor: EditorContext,
 }
 
 #[derive(Resource)]
 pub struct LiveGameMap {
-    // TODO: Use a shared struct for stored/live map with:
-    // - MapNode list (current state)
-    //    - Entities only have a mapnode id that can be used to look up their data, instead of the full MapNode
-    // - Undo tree
     pub save_path: PathBuf,
-    // TODO: Use bidirectional map
     pub node_lookup_table: HashMap<Ulid, Entity>,
 }
 
@@ -230,7 +267,7 @@ pub struct MapNode {
     #[serde(with = "ulid_as_u128")]
     pub id: Ulid,
     pub name: String,
-    pub kind: MapNodeKind,
+    pub kind: MMapNodeKind,
 }
 
 #[derive(Resource)]
@@ -239,29 +276,13 @@ struct LoadingMap {
     task: Task<MapLoadResult>,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
-pub enum MapNodeKind {
-    Brush(Brush),
-}
-
-impl MapNodeKind {
-    pub fn name(&self) -> &'static str {
-        match self {
-            MapNodeKind::Brush(_) => "Brush",
-        }
-    }
-}
-
 pub type MapLoadResult = Result<StoredGameMap, postcard::Error>;
 
 #[derive(Event)]
-pub struct CreateNewMapNode(pub MapNodeKind);
+pub struct CreateNewMapNode(pub MMapNodeKind);
 
 #[derive(Event)]
 pub struct LiveMapNodeChanged(Entity);
-
-pub const MAP_FILE_EXT: &str = "mmap";
-pub const DEFAULT_MAP_NAME: &str = "map";
 
 pub fn default_map_filename() -> String {
     format!("{}.{}", DEFAULT_MAP_NAME, MAP_FILE_EXT)
@@ -332,7 +353,7 @@ fn save_map(
 
     let stored_map = StoredGameMap {
         nodes: q_live_nodes.iter().cloned().collect(),
-        editor: StoredEditorContext {
+        editor: EditorContext {
             camera_pos: cam_t.translation(),
             camera_gimbal: cam_g.clone(),
         },
@@ -403,7 +424,7 @@ fn deploy_nodes(
         // Once this match is stupid large it should be split up. Perhaps using observer pattern,
         // fire an event using MapNodeKind generic. Register listeners for each kind.
         match &live_node.kind {
-            MapNodeKind::Brush(ref brush) => {
+            MMapNodeKind::Brush(ref brush) => {
                 // Brush will use base entity as a container for sides.
                 let center = brush.bounds.center();
                 let size = brush.bounds.size();
