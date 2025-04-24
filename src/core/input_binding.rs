@@ -184,7 +184,10 @@ impl Default for InputBindingMap {
         map.insert(Binding::Quit, BoundInput::key(KeyCode::KeyQ).with_control());
         map.insert(Binding::Playtest, BoundInput::key(KeyCode::Tab));
         map.insert(Binding::Undo, BoundInput::key(KeyCode::KeyZ).with_control());
-        map.insert(Binding::Redo, BoundInput::key(KeyCode::KeyY).with_control());
+        map.insert(
+            Binding::Redo,
+            BoundInput::key(KeyCode::KeyZ).with_control().with_shift(),
+        );
         map.insert(Binding::MoveLeft, BoundInput::key(KeyCode::KeyA));
         map.insert(Binding::MoveRight, BoundInput::key(KeyCode::KeyD));
         map.insert(Binding::MoveBackwards, BoundInput::key(KeyCode::KeyS));

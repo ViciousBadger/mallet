@@ -122,56 +122,60 @@ impl MMap {
         self.cur_delta_idx = new_node;
     }
 
+    pub fn can_undo(&self) -> bool {
+        self.delta_graph
+            .parents(self.cur_delta_idx)
+            .walk_next(&self.delta_graph)
+            .is_some()
+    }
+
     pub fn undo(&mut self) {
-        if let Some((_, parent_node_idx)) = self
+        let (_, parent_node_idx) = self
             .delta_graph
             .parents(self.cur_delta_idx)
             .walk_next(&self.delta_graph)
-        {
-            let reverse_of_current = self
-                .delta_graph
-                .node_weight(self.cur_delta_idx)
-                .unwrap()
-                .reverse_of();
+            .expect("Use can_undo() to check first");
 
-            self.apply(&reverse_of_current).unwrap();
-            self.cur_delta_idx = parent_node_idx;
-        } else {
-            warn!(
-                "Did not undo - no parent node found for {}.",
-                self.cur_delta_idx.index()
-            );
-        }
+        let reverse_of_current = self
+            .delta_graph
+            .node_weight(self.cur_delta_idx)
+            .unwrap()
+            .reverse_of();
+
+        self.apply(&reverse_of_current).unwrap();
+        self.cur_delta_idx = parent_node_idx;
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.delta_graph
+            .children(self.cur_delta_idx)
+            .walk_next(&self.delta_graph)
+            .is_some()
     }
 
     pub fn redo(&mut self) {
         // Assume the last child node to be most relevant change tree.
-        if let Some((_, child_node_idx)) = self
+        let (_, child_node_idx) = self
             .delta_graph
             .children(self.cur_delta_idx)
             .iter(&self.delta_graph)
             .last()
-        {
-            let child_delta = self
-                .delta_graph
-                .node_weight(child_node_idx)
-                .unwrap()
-                .clone();
-            self.apply(&child_delta).unwrap();
-            self.cur_delta_idx = child_node_idx;
-        } else {
-            warn!(
-                "Did not redo - no child nodes found for {}.",
-                self.cur_delta_idx.index()
-            );
-        }
+            .expect("Use can_redo() to check first");
+
+        let child_delta = self
+            .delta_graph
+            .node_weight(child_node_idx)
+            .unwrap()
+            .clone();
+        self.apply(&child_delta).unwrap();
+        self.cur_delta_idx = child_node_idx;
     }
 
     fn apply(&mut self, action: &MMapDelta) -> Result<(), MMapOpErr> {
         match action {
             MMapDelta::Nop => Ok(()),
             MMapDelta::AddNode { id, node } => {
-                if self.state.insert(*id, node.clone()).is_some() {
+                if self.state.insert(*id, node.clone()).is_none() {
                     Ok(())
                 } else {
                     Err(MMapOpErr::NodeExists)
@@ -338,7 +342,7 @@ fn unload_map(q_live_nodes: Query<Entity, With<MMapNodeId>>, mut commands: Comma
 }
 
 fn init_empty_map(data_path: Res<AppDataPath>, mut commands: Commands) {
-    commands.init_resource::<MMap>();
+    commands.insert_resource(MMap::default());
     commands.insert_resource(MMapContext::new(
         [data_path.get(), &default_map_filename()].iter().collect(),
     ));
@@ -420,11 +424,19 @@ fn map_mod_to_delta(
 }
 
 pub fn map_undo(mut map: ResMut<MMap>) {
-    map.undo();
+    if map.can_undo() {
+        map.undo();
+    } else {
+        info!("no parent nodes");
+    }
 }
 
 pub fn map_redo(mut map: ResMut<MMap>) {
-    map.redo();
+    if map.can_redo() {
+        map.redo();
+    } else {
+        info!("no child nodes");
+    }
 }
 
 fn reflect_map_changes_in_world(
@@ -435,6 +447,7 @@ fn reflect_map_changes_in_world(
     mut commands: Commands,
 ) {
     info!("reflecting map changes !!");
+
     if let Some(ref last_map) = *last_map {
         for node_id in new_map.node_ids() {
             if last_map.has_node(node_id) {
@@ -445,6 +458,7 @@ fn reflect_map_changes_in_world(
                 let entity_id = commands.spawn(node_id.clone()).id();
                 map_context.node_lookup.insert(*node_id, entity_id);
                 deploy_events.send(MMapNodeDeploy(*node_id));
+                info!("add {}", entity_id);
             }
         }
 
@@ -455,6 +469,7 @@ fn reflect_map_changes_in_world(
             .cloned()
             .collect();
         for entity in removed_node_entities {
+            info!("removed {}", entity);
             commands.entity(entity).despawn_recursive();
             map_context.node_lookup.remove_by_right(&entity);
         }
@@ -464,6 +479,7 @@ fn reflect_map_changes_in_world(
             let entity_id = commands.spawn(node_id.clone()).id();
             map_context.node_lookup.insert(*node_id, entity_id);
             deploy_events.send(MMapNodeDeploy(*node_id));
+            info!("add (nothing b4) {}", entity_id);
         }
     }
 
@@ -533,7 +549,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             PreUpdate,
             (
-                (unload_map, init_empty_map).run_if(input_just_released(KeyCode::KeyR)),
+                init_empty_map.run_if(input_just_released(KeyCode::KeyR)),
                 map_undo.run_if(input_just_pressed(Binding::Undo)),
                 map_redo.run_if(input_just_pressed(Binding::Redo)),
             )
