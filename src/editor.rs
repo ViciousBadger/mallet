@@ -2,20 +2,34 @@ pub mod actions;
 pub mod freelook;
 pub mod selection;
 
-use crate::core::{AppState, AppStateSwitchConf};
-use bevy::prelude::*;
+use crate::core::{
+    map::MMap,
+    view::{Gimbal, GimbalPos},
+    AppState,
+};
+use bevy::{
+    math::{vec2, vec3},
+    prelude::*,
+};
 use freelook::Freelook;
 
-fn init_editor(mut commands: Commands, init_conf: Option<Res<AppStateSwitchConf>>) {
-    let default_conf = AppStateSwitchConf::default();
-    let conf = init_conf
-        .map(|res| res.into_inner())
-        .unwrap_or(&default_conf);
+fn init_editor(mut commands: Commands, existing_map: Option<Res<MMap>>) {
+    let spawn_pos = if let Some(map) = existing_map {
+        map.editor_context.camera_pos.clone()
+    } else {
+        GimbalPos {
+            pos: vec3(0.0, 2.0, 0.0),
+            rot: Gimbal {
+                pitch_yaw: vec2(0.0, 0.4),
+                roll: 0.0,
+            },
+        }
+    };
 
     commands.spawn((
         StateScoped(AppState::InEditor),
-        Transform::from_translation(conf.pos),
-        conf.look.clone(),
+        Transform::from_translation(spawn_pos.pos),
+        spawn_pos.rot.clone(),
         Freelook::default(),
         Projection::Perspective(PerspectiveProjection {
             fov: 72.0_f32.to_radians(),

@@ -18,7 +18,7 @@ use wyrand::WyRand;
 
 use super::{
     input_binding::Binding,
-    view::{Gimbal, TeleportGimbalCamera},
+    view::{Gimbal, GimbalPos, TPCameraTo},
 };
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
@@ -44,6 +44,12 @@ pub struct MMap {
     Component,
 )]
 pub struct MMapNodeId(#[serde(with = "ulid_as_u128")] Ulid);
+
+impl std::fmt::Display for MMapNodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
 pub struct MMapNode {
@@ -158,8 +164,7 @@ impl MMap {
         let (_, child_node_idx) = self
             .delta_graph
             .children(self.cur_delta_idx)
-            .iter(&self.delta_graph)
-            .last()
+            .walk_next(&self.delta_graph)
             .expect("Use can_redo() to check first");
 
         let child_delta = self
@@ -235,11 +240,20 @@ pub struct MMapContext {
     pub node_lookup: BiHashMap<MMapNodeId, Entity>,
 }
 
+impl MMapContext {
+    pub fn node_to_entity(&self, node_id: &MMapNodeId) -> Option<&Entity> {
+        self.node_lookup.get_by_left(node_id)
+    }
+
+    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&MMapNodeId> {
+        self.node_lookup.get_by_right(entity_id)
+    }
+}
+
 /// Relevant editor state stored in the map file.
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct EditorContext {
-    camera_pos: Vec3,
-    camera_gimbal: Gimbal,
+    pub camera_pos: GimbalPos,
 }
 
 impl MMapContext {
@@ -293,19 +307,14 @@ async fn load_map_async(path: PathBuf) -> MMapLoadResult {
 fn insert_map_when_loaded(
     mut loading_map: ResMut<LoadingMMap>,
     mut commands: Commands,
-    mut changed_events: EventWriter<MMapNodeDeploy>,
-    mut tp_writer: EventWriter<TeleportGimbalCamera>,
+    mut tp_writer: EventWriter<TPCameraTo>,
 ) {
     if let Some(map_result) = block_on(future::poll_once(&mut loading_map.task)) {
         commands.remove_resource::<LoadingMMap>();
 
         match map_result {
             Ok(map) => {
-                tp_writer.send(TeleportGimbalCamera {
-                    new_pos: map.editor_context.camera_pos,
-                    new_gimbal: map.editor_context.camera_gimbal.clone(),
-                });
-
+                tp_writer.send(TPCameraTo(map.editor_context.camera_pos));
                 commands.insert_resource(map);
                 commands.insert_resource(MMapContext::new(loading_map.path.clone()));
             }
@@ -319,8 +328,7 @@ fn insert_map_when_loaded(
 fn update_editor_context(mut map: ResMut<MMap>, q_camera: Query<(&GlobalTransform, &Gimbal)>) {
     let (cam_t, cam_g) = q_camera.single();
     let new_context = EditorContext {
-        camera_pos: cam_t.translation(),
-        camera_gimbal: cam_g.clone(),
+        camera_pos: GimbalPos::gimbal(cam_t.translation(), *cam_g),
     };
     map.editor_context = new_context;
 }
@@ -372,7 +380,7 @@ fn init_empty_map(data_path: Res<AppDataPath>, mut commands: Commands) {
 //     mut removals: RemovedComponents<MapNode>,
 //     mut live_map: ResMut<LiveGameMap>,
 // ) {
-//     let removed_entities: HashSet<Entity> = removals.read().collect();
+//     let removed_despawn: HashSet<Entity> = removals.read().collect();
 //     live_map
 //         .node_lookup_table
 //         .retain(|_, v| !removed_entities.contains(v));
@@ -449,10 +457,13 @@ fn reflect_map_changes_in_world(
     info!("reflecting map changes !!");
 
     if let Some(ref last_map) = *last_map {
-        for node_id in new_map.node_ids() {
-            if last_map.has_node(node_id) {
-                // Modify
-                deploy_events.send(MMapNodeDeploy(*node_id));
+        for (node_id, node) in new_map.nodes_with_id() {
+            if let Some(last_node) = last_map.get_node(node_id) {
+                if node != last_node {
+                    // Modify
+                    info!("mod {}", node_id);
+                    deploy_events.send(MMapNodeDeploy(*node_id));
+                }
             } else {
                 // Add
                 let entity_id = commands.spawn(node_id.clone()).id();
@@ -465,9 +476,10 @@ fn reflect_map_changes_in_world(
         let removed_node_entities: Vec<Entity> = last_map
             .node_ids()
             .filter(|id| !new_map.has_node(id))
-            .filter_map(|id| map_context.node_lookup.get_by_left(id))
+            .filter_map(|id| map_context.node_to_entity(id))
             .cloned()
             .collect();
+
         for entity in removed_node_entities {
             info!("removed {}", entity);
             commands.entity(entity).despawn_recursive();
@@ -489,13 +501,13 @@ fn reflect_map_changes_in_world(
 fn deploy_nodes(
     map: Res<MMap>,
     map_context: Res<MMapContext>,
-    mut changed_events: EventReader<MMapNodeDeploy>,
+    mut deploy_events: EventReader<MMapNodeDeploy>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     info!("deplopy");
-    for event in changed_events.read() {
+    for event in deploy_events.read() {
         let node_id = event.0;
         let node_entity_id = *map_context.node_lookup.get_by_left(&event.0).unwrap();
 

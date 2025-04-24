@@ -4,30 +4,15 @@ pub mod view;
 
 use bevy::{input::common_conditions::input_just_pressed, prelude::*};
 use input_binding::{Binding, InputBindingSystem};
-use view::Gimbal;
+use view::{Gimbal, GimbalPos};
 
-use crate::util::IdGen;
+use crate::{game::GameRules, util::IdGen};
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AppState {
     #[default]
     InEditor,
     InGame,
-}
-
-#[derive(Resource)]
-pub struct AppStateSwitchConf {
-    pub pos: Vec3,
-    pub look: Gimbal,
-}
-
-impl Default for AppStateSwitchConf {
-    fn default() -> Self {
-        Self {
-            pos: Vec3::Y * 5.0,
-            look: default(),
-        }
-    }
 }
 
 fn playtest(
@@ -37,9 +22,11 @@ fn playtest(
     mut commands: Commands,
 ) {
     if let Ok((transform, gimbal)) = q_existing_cam.get_single() {
-        commands.insert_resource(AppStateSwitchConf {
-            pos: transform.translation(),
-            look: gimbal.clone(),
+        commands.insert_resource(GameRules {
+            spawn: GimbalPos {
+                pos: transform.translation(),
+                rot: gimbal.clone(),
+            },
         });
     }
 

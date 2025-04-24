@@ -6,13 +6,30 @@ use bevy::prelude::*;
 
 use crate::{
     core::{
-        input_binding::InputBindingSystem, view::GimbalRotatesParent, AppState, AppStateSwitchConf,
+        view::{GimbalPos, GimbalRotatesParent},
+        AppState,
     },
     util::{grab_mouse, release_mouse},
 };
 
-fn init_game(mut commands: Commands, init_conf: Option<Res<AppStateSwitchConf>>) {
-    let default_conf = AppStateSwitchConf::default();
+#[derive(Resource)]
+pub struct GameRules {
+    pub spawn: GimbalPos,
+}
+
+impl Default for GameRules {
+    fn default() -> Self {
+        Self {
+            spawn: GimbalPos {
+                pos: Vec3::Y * 5.0,
+                rot: default(),
+            },
+        }
+    }
+}
+
+fn init_game(mut commands: Commands, init_conf: Option<Res<GameRules>>) {
+    let default_conf = GameRules::default();
     let conf = init_conf
         .map(|res| res.into_inner())
         .unwrap_or(&default_conf);
@@ -27,7 +44,7 @@ fn init_game(mut commands: Commands, init_conf: Option<Res<AppStateSwitchConf>>)
         .spawn((
             StateScoped(AppState::InGame),
             PlayerActor,
-            Transform::from_translation(conf.pos - Vec3::Y * player_head_height),
+            Transform::from_translation(conf.spawn.pos - Vec3::Y * player_head_height),
             Visibility::Visible,
             RigidBody::Kinematic,
             ShapeCaster::new(caster_shape, Vec3::ZERO, Quat::IDENTITY, Dir3::NEG_Y)
@@ -45,7 +62,7 @@ fn init_game(mut commands: Commands, init_conf: Option<Res<AppStateSwitchConf>>)
                 fov: 72.0_f32.to_radians(),
                 ..default()
             }),
-            conf.look.clone(),
+            conf.spawn.rot.clone(),
             GimbalRotatesParent,
         ))
         .set_parent(player);

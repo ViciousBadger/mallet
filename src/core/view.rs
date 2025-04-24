@@ -10,21 +10,43 @@ use super::AppState;
 
 /// For gimbal-locked rotation.
 /// Pitch=X, Yaw=Y, Roll=Z
-#[derive(Component, Default, Clone, Serialize, Deserialize)]
+#[derive(Component, Debug, Default, Copy, Clone, Serialize, Deserialize)]
 #[require(Transform)]
 pub struct Gimbal {
     pub pitch_yaw: Vec2,
     pub roll: f32,
 }
 
+impl Gimbal {
+    pub fn new(pitch_yaw: Vec2, roll: f32) -> Self {
+        Self { pitch_yaw, roll }
+    }
+}
+
+#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
+pub struct GimbalPos {
+    pub pos: Vec3,
+    pub rot: Gimbal,
+}
+
+impl GimbalPos {
+    pub fn gimbal(pos: Vec3, rot: Gimbal) -> Self {
+        Self { pos, rot }
+    }
+
+    pub fn pitch_yaw_roll(pos: Vec3, pitch_yaw: Vec2, roll: f32) -> Self {
+        Self {
+            pos,
+            rot: Gimbal { pitch_yaw, roll },
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct GimbalRotatesParent;
 
-#[derive(Event)]
-pub struct TeleportGimbalCamera {
-    pub new_pos: Vec3,
-    pub new_gimbal: Gimbal,
-}
+#[derive(Event, Deref)]
+pub struct TPCameraTo(pub GimbalPos);
 
 const PITCH_LIMIT: f32 = 88.0_f32.to_radians();
 
@@ -39,14 +61,14 @@ const PITCH_LIMIT: f32 = 88.0_f32.to_radians();
 //
 
 fn teleport(
-    mut tp_reader: EventReader<TeleportGimbalCamera>,
+    mut tp_reader: EventReader<TPCameraTo>,
     mut q_gimbal_cam: Query<(&mut Transform, &mut Gimbal)>,
 ) {
     // TODO: Should take care of transform hiearchy
-    if let Some(last) = tp_reader.read().last() {
+    if let Some(tp) = tp_reader.read().last() {
         let (mut cam_t, mut cam_g) = q_gimbal_cam.single_mut();
-        cam_t.translation = last.new_pos;
-        *cam_g = last.new_gimbal.clone();
+        cam_t.translation = tp.pos;
+        *cam_g = tp.rot.clone();
     }
 }
 
@@ -111,7 +133,7 @@ fn gimbal_parent_rotation(
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_event::<TeleportGimbalCamera>()
+    app.add_event::<TPCameraTo>()
         .add_systems(
             PreUpdate,
             (

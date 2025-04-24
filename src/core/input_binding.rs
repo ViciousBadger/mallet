@@ -1,7 +1,6 @@
 use bevy::input::mouse::MouseWheel;
 use bevy::input::InputSystem;
 use bevy::{prelude::*, utils::HashMap};
-use itertools::Itertools;
 
 /// Inputs bound to application actions.
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]

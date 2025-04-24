@@ -4,8 +4,10 @@ mod editor;
 mod game;
 mod util;
 
+use std::time::Duration;
+
 use avian3d::PhysicsPlugins;
-use bevy::prelude::*;
+use bevy::{prelude::*, time::common_conditions::on_timer};
 use color_eyre::eyre::Result;
 
 pub const APP_NAME: &str = "Mallet";
@@ -25,8 +27,14 @@ fn main() -> Result<()> {
         // Only update when there is user input. Should be disabled when in-game
         //.insert_resource(WinitSettings::desktop_app())
         .add_systems(PreUpdate, file_drop)
+        .add_systems(Update, debuggy.run_if(on_timer(Duration::from_secs(1))))
         .run();
     Ok(())
+}
+
+fn debuggy(q_all_entities: Query<Entity>) {
+    let entities = q_all_entities.iter().len();
+    info!("{} entities", entities);
 }
 
 fn file_drop(mut evr_dnd: EventReader<FileDragAndDrop>) {
