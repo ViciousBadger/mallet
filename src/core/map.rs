@@ -9,7 +9,8 @@ use bevy::{
     utils::{HashMap, HashSet},
 };
 use brush::Brush;
-use petgraph::Graph;
+use color_eyre::owo_colors::OwoColorize;
+use daggy::{Dag, NodeIndex, Walker};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{fs::File, path::PathBuf};
@@ -20,51 +21,174 @@ use super::view::{Gimbal, TeleportGimbalCamera};
 
 // testing grounds
 
-#[derive(Resource, Default)]
-pub struct LiveMap {
-    pub nodes: HashMap<Ulid, MapNode>,
-    pub graph_idx: u32,
+#[derive(Resource, Serialize, Deserialize)]
+pub struct MMap {
+    state: HashMap<MMapId, MMapNode>,
+    cur_delta_idx: NodeIndex<u32>,
+    delta_graph: Dag<MMapDelta, ()>,
 }
 
-#[derive(Resource, Deref)]
-pub struct MapActionGraph(Graph<MapAction, ()>);
+#[derive(
+    Deref, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, Clone, Copy, Serialize, Deserialize,
+)]
+pub struct MMapId(#[serde(with = "ulid_as_u128")] Ulid);
 
-impl LiveMap {
-    pub fn apply(&mut self, action: MapAction) {
+#[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
+pub struct MMapNode {
+    pub name: String,
+    pub kind: MapNodeKind,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub enum MMapDelta {
+    Nop,
+    AddNode {
+        id: MMapId,
+        node: MMapNode,
+    },
+    ModifyNode {
+        id: MMapId,
+        before: MMapNode,
+        after: MMapNode,
+    },
+    RemoveNode {
+        id: MMapId,
+        node: MMapNode,
+    },
+}
+
+#[derive(Debug)]
+enum MMapOpErr {
+    NodeExists,
+    NodeNotFound,
+}
+
+impl Default for MMap {
+    fn default() -> Self {
+        let mut graph: Dag<MMapDelta, ()> = Dag::new();
+        let root_node = graph.add_node(MMapDelta::Nop);
+        Self {
+            state: HashMap::new(),
+            cur_delta_idx: root_node,
+            delta_graph: graph,
+        }
+    }
+}
+
+impl MMap {
+    fn nodes(&self) -> impl Iterator<Item = &MMapNode> {
+        self.state.values()
+    }
+
+    fn nodes_with_id(&self) -> impl Iterator<Item = (&MMapId, &MMapNode)> {
+        self.state.iter()
+    }
+
+    fn get_node(&self, id: &MMapId) -> Option<&MMapNode> {
+        self.state.get(id)
+    }
+
+    pub fn push(&mut self, new_delta: MMapDelta) {
+        self.apply(&new_delta).unwrap();
+        let (_new_edge, new_node) =
+            self.delta_graph
+                .add_child(self.cur_delta_idx.into(), (), new_delta);
+        self.cur_delta_idx = new_node;
+    }
+
+    pub fn undo(&mut self) {
+        if let Some((_, parent_node_idx)) = self
+            .delta_graph
+            .parents(self.cur_delta_idx)
+            .walk_next(&self.delta_graph)
+        {
+            let reverse_parent = self
+                .delta_graph
+                .node_weight(parent_node_idx)
+                .unwrap()
+                .reverse_of();
+
+            self.apply(&reverse_parent).unwrap();
+            self.cur_delta_idx = parent_node_idx;
+        } else {
+            warn!(
+                "Did not undo - no parent node found for {}.",
+                self.cur_delta_idx.index()
+            );
+        }
+    }
+
+    pub fn redo(&mut self) {
+        // Assume the last child node to be most relevant change tree.
+        if let Some((_, child_node_idx)) = self
+            .delta_graph
+            .children(self.cur_delta_idx)
+            .iter(&self.delta_graph)
+            .last()
+        {
+            let child_delta = self
+                .delta_graph
+                .node_weight(child_node_idx)
+                .unwrap()
+                .clone();
+            self.apply(&child_delta).unwrap();
+            self.cur_delta_idx = child_node_idx;
+        } else {
+            warn!(
+                "Did not redo - no child nodes found for {}.",
+                self.cur_delta_idx.index()
+            );
+        }
+    }
+
+    fn apply(&mut self, action: &MMapDelta) -> Result<(), MMapOpErr> {
         match action {
-            MapAction::Init => {}
-            MapAction::AddNode { id, node } => {
-                self.nodes.insert(id, node.clone());
+            MMapDelta::Nop => Ok(()),
+            MMapDelta::AddNode { id, node } => {
+                if self.state.insert(*id, node.clone()).is_some() {
+                    Ok(())
+                } else {
+                    Err(MMapOpErr::NodeExists)
+                }
             }
-            MapAction::ModifyNode { before, after } => todo!(),
-            MapAction::RemoveNode(ulid) => todo!(),
-        }
-    }
-
-    pub fn undo(&mut self, action: MapAction) {
-        match action {
-            MapAction::Init => {}
-            MapAction::AddNode { id, node } => todo!(),
-            MapAction::ModifyNode { before, after } => todo!(),
-            MapAction::RemoveNode(ulid) => todo!(),
+            MMapDelta::ModifyNode { id, after, .. } => {
+                if let Some(node) = self.state.get_mut(id) {
+                    *node = after.clone();
+                    Ok(())
+                } else {
+                    Err(MMapOpErr::NodeNotFound)
+                }
+            }
+            MMapDelta::RemoveNode { id, .. } => {
+                if self.state.remove(id).is_some() {
+                    Ok(())
+                } else {
+                    Err(MMapOpErr::NodeNotFound)
+                }
+            }
         }
     }
 }
 
-impl MapActionGraph {
-    pub fn new() -> Self {
-        let mut g: Graph<MapAction, ()> = Graph::new();
-        g.add_node(MapAction::Init);
-        Self(g)
+impl MMapDelta {
+    pub fn reverse_of(&self) -> MMapDelta {
+        match self {
+            MMapDelta::Nop => MMapDelta::Nop,
+            MMapDelta::AddNode { id, node } => MMapDelta::RemoveNode {
+                id: *id,
+                node: node.clone(),
+            },
+            MMapDelta::ModifyNode { id, before, after } => MMapDelta::ModifyNode {
+                id: *id,
+                before: after.clone(),
+                after: before.clone(),
+            },
+            MMapDelta::RemoveNode { id, node } => MMapDelta::AddNode {
+                id: *id,
+                node: node.clone(),
+            },
+        }
     }
-}
-
-#[derive(Serialize, Deserialize)]
-pub enum MapAction {
-    Init,
-    AddNode { id: Ulid, node: MapNode },
-    ModifyNode { before: MapNode, after: MapNode },
-    RemoveNode(Ulid),
 }
 
 // tesiting end
