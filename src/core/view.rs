@@ -1,4 +1,5 @@
 use bevy::{input::mouse::MouseMotion, prelude::*};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     core::input_binding::{BindingAxis, BindingAxisFns, InputBindingSystem},
@@ -9,7 +10,7 @@ use super::AppState;
 
 /// For gimbal-locked rotation.
 /// Pitch=X, Yaw=Y, Roll=Z
-#[derive(Component, Default, Clone)]
+#[derive(Component, Default, Clone, Serialize, Deserialize)]
 #[require(Transform)]
 pub struct Gimbal {
     pub pitch_yaw: Vec2,
@@ -18,6 +19,12 @@ pub struct Gimbal {
 
 #[derive(Component)]
 pub struct GimbalRotatesParent;
+
+#[derive(Event)]
+pub struct TeleportGimbalCamera {
+    pub new_pos: Vec3,
+    pub new_gimbal: Gimbal,
+}
 
 const PITCH_LIMIT: f32 = 88.0_f32.to_radians();
 
@@ -30,6 +37,19 @@ const PITCH_LIMIT: f32 = 88.0_f32.to_radians();
 //     }
 // }
 //
+
+fn teleport(
+    mut tp_reader: EventReader<TeleportGimbalCamera>,
+    mut q_gimbal_cam: Query<(&mut Transform, &mut Gimbal)>,
+) {
+    // TODO: Should take care of transform hiearchy
+    if let Some(last) = tp_reader.read().last() {
+        let (mut cam_t, mut cam_g) = q_gimbal_cam.single_mut();
+        cam_t.translation = last.new_pos;
+        *cam_g = last.new_gimbal.clone();
+    }
+}
+
 fn gimbal_mouse_input(
     mut mouse_motion: EventReader<MouseMotion>,
     mut q_gimbal: Query<&mut Gimbal>,
@@ -91,18 +111,19 @@ fn gimbal_parent_rotation(
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(
-        PreUpdate,
-        (
-            gimbal_mouse_input.run_if(
-                on_event::<MouseMotion>
-                    .and(in_state(AppState::InGame).or(in_state(FreelookState::Locked))),
-            ),
-            gimbal_binding_input,
-            gimbal_limit,
+    app.add_event::<TeleportGimbalCamera>()
+        .add_systems(
+            PreUpdate,
+            (
+                gimbal_mouse_input.run_if(
+                    on_event::<MouseMotion>
+                        .and(in_state(AppState::InGame).or(in_state(FreelookState::Locked))),
+                ),
+                gimbal_binding_input,
+                gimbal_limit,
+            )
+                .chain()
+                .after(InputBindingSystem),
         )
-            .chain()
-            .after(InputBindingSystem),
-    )
-    .add_systems(Update, (gimbal_rotation, gimbal_parent_rotation));
+        .add_systems(Update, (gimbal_rotation, gimbal_parent_rotation, teleport));
 }

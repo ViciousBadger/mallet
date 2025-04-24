@@ -3,6 +3,7 @@ pub mod brush;
 use crate::{app_data::AppDataPath, core::input_binding::InputBindingSystem, util::IdGen};
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
+    core_pipeline::post_process::PostProcessingNode,
     input::common_conditions::input_just_released,
     prelude::*,
     tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
@@ -15,9 +16,18 @@ use std::{fs::File, path::PathBuf};
 use ulid::{serde::ulid_as_u128, Ulid};
 use wyrand::WyRand;
 
+use super::view::{Gimbal, TeleportGimbalCamera};
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct StoredGameMap {
     pub nodes: Vec<MapNode>,
+    pub editor: StoredEditorContext,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct StoredEditorContext {
+    camera_pos: Vec3,
+    camera_gimbal: Gimbal,
 }
 
 #[derive(Resource)]
@@ -46,7 +56,7 @@ pub struct MapNode {
 #[derive(Resource)]
 struct LoadingMap {
     path: PathBuf,
-    task: Task<StoredGameMap>,
+    task: Task<MapLoadResult>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -61,6 +71,8 @@ impl MapNodeKind {
         }
     }
 }
+
+pub type MapLoadResult = Result<StoredGameMap, postcard::Error>;
 
 #[derive(Event)]
 pub struct CreateNewMapNode(pub MapNodeKind);
@@ -81,8 +93,7 @@ fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
         let task_owned_path = path.clone();
         let task = async move {
             let bytes = std::fs::read(task_owned_path).unwrap();
-            let map: StoredGameMap = postcard::from_bytes(&bytes).unwrap();
-            map
+            postcard::from_bytes::<StoredGameMap>(&bytes)
         };
         let task_pool = AsyncComputeTaskPool::get();
         commands.insert_resource(LoadingMap {
@@ -102,26 +113,49 @@ fn insert_map_when_loaded(
     mut loading_map: ResMut<LoadingMap>,
     mut commands: Commands,
     mut changed_events: EventWriter<LiveMapNodeChanged>,
+    mut tp_writer: EventWriter<TeleportGimbalCamera>,
 ) {
-    if let Some(map) = block_on(future::poll_once(&mut loading_map.task)) {
+    if let Some(map_result) = block_on(future::poll_once(&mut loading_map.task)) {
         commands.remove_resource::<LoadingMap>();
-        let mut live_map = LiveGameMap::new(loading_map.path.clone());
-        for node in map.nodes {
-            let node_id = node.id;
-            let entity = commands.spawn(node).id();
-            changed_events.send(LiveMapNodeChanged(entity));
-            live_map.node_lookup_table.insert(node_id, entity);
+
+        match map_result {
+            Ok(map) => {
+                let mut live_map = LiveGameMap::new(loading_map.path.clone());
+                for node in map.nodes {
+                    let node_id = node.id;
+                    let entity = commands.spawn(node).id();
+                    changed_events.send(LiveMapNodeChanged(entity));
+                    live_map.node_lookup_table.insert(node_id, entity);
+                }
+                commands.insert_resource(live_map);
+
+                tp_writer.send(TeleportGimbalCamera {
+                    new_pos: map.editor.camera_pos,
+                    new_gimbal: map.editor.camera_gimbal.clone(),
+                });
+            }
+            Err(err) => {
+                error!("Failed to load map: {}", err);
+            }
         }
-        commands.insert_resource(live_map);
     }
 }
 
-fn save_map(map: Res<LiveGameMap>, q_live_nodes: Query<&MapNode>) {
+fn save_map(
+    map: Res<LiveGameMap>,
+    q_live_nodes: Query<&MapNode>,
+    q_camera: Query<(&GlobalTransform, &Gimbal)>,
+) {
     // TODO: async, of course this would mean it can't run on AppExit.
     let file = File::create(&map.save_path).unwrap();
+    let (cam_t, cam_g) = q_camera.single();
 
     let stored_map = StoredGameMap {
         nodes: q_live_nodes.iter().cloned().collect(),
+        editor: StoredEditorContext {
+            camera_pos: cam_t.translation(),
+            camera_gimbal: cam_g.clone(),
+        },
     };
     postcard::to_io(&stored_map, file).unwrap();
 }
