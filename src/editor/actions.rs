@@ -5,7 +5,7 @@ use crate::{
         input_binding::InputBindingSystem,
         map::{
             brush::{Brush, BrushBounds},
-            CreateNewMapNode, MMapNodeKind,
+            MMapDelta, MMapMod, MMapNodeKind,
         },
     },
     editor::selection::{Sel, SelMode},
@@ -47,7 +47,7 @@ fn end_building_brush_here(
     process: Res<BuildBrushProcess>,
     sel: Res<Sel>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
-    mut new_map_node_events: EventWriter<CreateNewMapNode>,
+    mut map_mods: EventWriter<MMapMod>,
 ) {
     let start = process.start;
     let end = sel.position;
@@ -55,7 +55,10 @@ fn end_building_brush_here(
 
     if bounds.is_valid() {
         // do the thing
-        new_map_node_events.send(CreateNewMapNode(MMapNodeKind::Brush(Brush { bounds })));
+        //map.push(MMapDelta::AddNode { id: hgg, node: () }
+        //new_map_node_events.send(CreateNewMapNode(MMapNodeKind::Brush(Brush { bounds })));
+
+        map_mods.send(MMapMod::Add(MMapNodeKind::Brush(Brush { bounds })));
         next_editor_action.set(EditorAction::None);
     }
 }
