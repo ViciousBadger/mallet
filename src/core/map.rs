@@ -32,7 +32,12 @@ pub struct StoredEditorContext {
 
 #[derive(Resource)]
 pub struct LiveGameMap {
+    // TODO: Use a shared struct for stored/live map with:
+    // - MapNode list (current state)
+    //    - Entities only have a mapnode id that can be used to look up their data, instead of the full MapNode
+    // - Undo tree
     pub save_path: PathBuf,
+    // TODO: Use bidirectional map
     pub node_lookup_table: HashMap<Ulid, Entity>,
 }
 
