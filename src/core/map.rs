@@ -435,6 +435,7 @@ fn reflect_map_changes_in_world(
     mut commands: Commands,
 ) {
     info!("reflecting map changes !!");
+
     if let Some(ref last_map) = *last_map {
         for node_id in new_map.node_ids() {
             if last_map.has_node(node_id) {
