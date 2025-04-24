@@ -44,6 +44,7 @@ fn exit_app(mut exit_events: ResMut<Events<AppExit>>) {
 pub fn plugin(app: &mut App) {
     app.add_plugins((binds::plugin, view::plugin, map::plugin))
         .init_resource::<IdGen>()
+        .insert_resource(ClearColor(Color::BLACK))
         .init_state::<AppState>()
         .enable_state_scoped_entities::<AppState>()
         .add_systems(

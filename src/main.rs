@@ -27,7 +27,7 @@ fn main() -> Result<()> {
         // Only update when there is user input. Should be disabled when in-game
         //.insert_resource(WinitSettings::desktop_app())
         .add_systems(PreUpdate, file_drop)
-        .add_systems(Update, debuggy.run_if(on_timer(Duration::from_secs(1))))
+        //.add_systems(Update, debuggy.run_if(on_timer(Duration::from_secs(1))))
         .run();
     Ok(())
 }

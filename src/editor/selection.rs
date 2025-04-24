@@ -145,7 +145,7 @@ fn draw_sel_gizmos(
     mut grid_gizmos: Gizmos<SelGridGizmos>,
     mut axis_gizmos: Gizmos<SelAxisGizmos>,
 ) {
-    let grid_line_color = css::DIM_GRAY.with_alpha(0.1);
+    let grid_line_color = css::DIM_GRAY.with_alpha(0.33);
 
     let mut iso = sel.axis.as_plane().isometry_from_xy(sel.grid_center());
     iso.translation = sel.grid_center().into();

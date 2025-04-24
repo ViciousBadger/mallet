@@ -346,14 +346,20 @@ fn unload_map(q_live_nodes: Query<Entity, With<MMapNodeId>>, mut commands: Comma
         commands.entity(entity).despawn_recursive();
     }
     commands.remove_resource::<MMap>();
-    commands.remove_resource::<MMapContext>();
+    // commands.remove_resource::<MMapContext>();
 }
 
-fn init_empty_map(data_path: Res<AppDataPath>, mut commands: Commands) {
+fn init_empty_map(
+    data_path: Res<AppDataPath>,
+    map_context: Option<Res<MMapContext>>,
+    mut commands: Commands,
+) {
     commands.insert_resource(MMap::default());
-    commands.insert_resource(MMapContext::new(
-        [data_path.get(), &default_map_filename()].iter().collect(),
-    ));
+    if map_context.is_none() {
+        commands.insert_resource(MMapContext::new(
+            [data_path.get(), &default_map_filename()].iter().collect(),
+        ));
+    }
 }
 
 // fn create_new_map_nodes(
@@ -481,7 +487,7 @@ fn reflect_map_changes_in_world(
             .collect();
 
         for entity in removed_node_entities {
-            info!("removed {}", entity);
+            info!("fuck off {}", entity);
             commands.entity(entity).despawn_recursive();
             map_context.node_lookup.remove_by_right(&entity);
         }
@@ -561,7 +567,9 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             PreUpdate,
             (
-                init_empty_map.run_if(input_just_released(KeyCode::KeyR)),
+                (init_empty_map)
+                    .chain()
+                    .run_if(input_just_released(KeyCode::KeyR)),
                 map_undo.run_if(input_just_pressed(Binding::Undo)),
                 map_redo.run_if(input_just_pressed(Binding::Redo)),
                 save_map.run_if(input_just_pressed(Binding::Save)),
