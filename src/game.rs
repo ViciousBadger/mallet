@@ -62,7 +62,7 @@ fn init_game(mut commands: Commands, init_conf: Option<Res<GameRules>>) {
                 fov: 72.0_f32.to_radians(),
                 ..default()
             }),
-            conf.spawn.rot.clone(),
+            conf.spawn.rot,
             GimbalRotatesParent,
         ))
         .set_parent(player);

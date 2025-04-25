@@ -1,6 +1,5 @@
 use bevy::{
     color::palettes::css,
-    ecs::schedule::NodeId,
     input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
 };
@@ -10,11 +9,8 @@ use crate::{
         binds::InputBindingSystem,
         map::{
             brush::{Brush, BrushBounds},
-            light::{
-                Light,
-                LightType::{self, Point},
-            },
-            DeployMapNode, Map, MapChange, MapContext, MapDelta, MapNode,
+            light::{Light, LightType},
+            DeployMapNode, Map, MapChange, MapContext, MapNode,
         },
     },
     editor::selection::{Sel, SelMode},

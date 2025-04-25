@@ -1,5 +1,3 @@
-use core::f32;
-
 use avian3d::prelude::{AnyCollider, Collider, SpatialQuery, SpatialQueryFilter};
 use bevy::{
     color::palettes::css,
@@ -8,7 +6,6 @@ use bevy::{
         mouse::MouseMotion,
     },
     prelude::*,
-    text::cosmic_text::Editor,
     window::PrimaryWindow,
 };
 use itertools::Itertools;

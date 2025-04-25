@@ -15,7 +15,7 @@ use freelook::Freelook;
 
 fn init_editor(mut commands: Commands, existing_map: Option<Res<Map>>) {
     let spawn_pos = if let Some(map) = existing_map {
-        map.editor_context.camera_pos.clone()
+        map.editor_context.camera_pos
     } else {
         GimbalPos {
             pos: vec3(0.0, 2.0, 0.0),
@@ -29,7 +29,7 @@ fn init_editor(mut commands: Commands, existing_map: Option<Res<Map>>) {
     commands.spawn((
         StateScoped(AppState::InEditor),
         Transform::from_translation(spawn_pos.pos),
-        spawn_pos.rot.clone(),
+        spawn_pos.rot,
         Freelook::default(),
         Projection::Perspective(PerspectiveProjection {
             fov: 72.0_f32.to_radians(),

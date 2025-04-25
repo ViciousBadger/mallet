@@ -70,7 +70,7 @@ fn playtest(
         commands.insert_resource(GameRules {
             spawn: GimbalPos {
                 pos: transform.translation(),
-                rot: gimbal.clone(),
+                rot: *gimbal,
             },
         });
     }

@@ -78,7 +78,7 @@ fn teleport(
     if let Some(tp) = tp_reader.read().last() {
         let (mut cam_t, mut cam_g) = q_gimbal_cam.single_mut();
         cam_t.translation = tp.pos;
-        *cam_g = tp.rot.clone();
+        *cam_g = tp.rot;
     }
 }
 
@@ -130,6 +130,7 @@ fn gimbal_rotation(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn gimbal_parent_rotation(
     q_gimbal_changed: Query<(&Gimbal, &Parent), (Changed<Gimbal>, With<GimbalRotatesParent>)>,
     mut q_transforms: Query<&mut Transform, Without<GimbalRotatesParent>>, // ensure parallel compability

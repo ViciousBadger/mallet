@@ -2,11 +2,7 @@ pub mod brush;
 pub mod light;
 
 use crate::{app_data::AppDataPath, core::binds::InputBindingSystem, util::IdGen};
-use avian3d::{
-    math::Quaternion,
-    parry::either::IntoEither,
-    prelude::{Collider, RigidBody},
-};
+use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
     input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
@@ -16,11 +12,9 @@ use bimap::BiHashMap;
 use brush::Brush;
 use daggy::{Dag, NodeIndex, Walker};
 use light::Light;
-use rand::{RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs::File, path::PathBuf};
 use ulid::{serde::ulid_as_u128, Ulid};
-use wyrand::WyRand;
 
 use super::{
     binds::Binding,
@@ -159,9 +153,9 @@ impl Map {
 
     pub fn push(&mut self, new_delta: MapDelta) {
         self.apply(&new_delta).unwrap();
-        let (_new_edge, new_node) =
-            self.delta_graph
-                .add_child(self.cur_delta_idx.into(), (), new_delta);
+        let (_new_edge, new_node) = self
+            .delta_graph
+            .add_child(self.cur_delta_idx, (), new_delta);
         self.cur_delta_idx = new_node;
     }
 
@@ -452,8 +446,8 @@ pub fn redo_map_change(mut map: ResMut<Map>) {
 }
 
 fn reflect_map_changes_in_world(
-    mut last_map: Local<Option<Map>>,
     new_map: Res<Map>,
+    mut last_map: Local<Option<Map>>,
     mut map_context: ResMut<MapContext>,
     mut deploy_events: EventWriter<DeployMapNode>,
     mut commands: Commands,
@@ -468,7 +462,7 @@ fn reflect_map_changes_in_world(
                     info!("mod {}", node_id);
                     let entity_id = *map_context
                         .node_to_entity(node_id)
-                        .expect("Modified node to already be instantiated in world");
+                        .expect("Modified node should already be instantiated in world");
                     deploy_events.send(DeployMapNode {
                         entity_id,
                         node: node.clone(),
@@ -476,7 +470,7 @@ fn reflect_map_changes_in_world(
                 }
             } else {
                 // Add
-                let entity_id = commands.spawn(node_id.clone()).id();
+                let entity_id = commands.spawn(*node_id).id();
                 map_context.node_lookup.insert(*node_id, entity_id);
                 deploy_events.send(DeployMapNode {
                     entity_id,
@@ -501,7 +495,7 @@ fn reflect_map_changes_in_world(
     } else {
         // Nothing to compare with, add all.
         for (node_id, node) in new_map.iter() {
-            let entity_id = commands.spawn(node_id.clone()).id();
+            let entity_id = commands.spawn(*node_id).id();
             map_context.node_lookup.insert(*node_id, entity_id);
             deploy_events.send(DeployMapNode {
                 entity_id,
@@ -519,7 +513,6 @@ fn deploy_nodes(
     mut deploy_events: EventReader<DeployMapNode>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for event in deploy_events.read() {
         let mut entity_commands = commands.entity(event.entity_id);

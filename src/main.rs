@@ -4,10 +4,8 @@ mod editor;
 mod game;
 mod util;
 
-use std::time::Duration;
-
 use avian3d::PhysicsPlugins;
-use bevy::{prelude::*, time::common_conditions::on_timer};
+use bevy::prelude::*;
 use color_eyre::eyre::Result;
 
 pub const APP_NAME: &str = "Mallet";
