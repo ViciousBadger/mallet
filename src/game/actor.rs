@@ -1,6 +1,6 @@
 use crate::core::binds::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem};
 use avian3d::prelude::{narrow_phase::NarrowPhaseSet, *};
-use bevy::prelude::*;
+use bevy::{math::vec2, prelude::*};
 
 use super::GameSystems;
 
@@ -51,7 +51,7 @@ fn update_grounded(
 }
 
 const ACCEL: f32 = 60.0;
-const AIR_ACCEL: f32 = 30.0;
+const AIR_ACCEL: f32 = 14.0;
 const TOP_SPEED: f32 = 6.0;
 const GRAV: f32 = 9.81 * 2.0;
 const JUMP: f32 = 8.0;
@@ -102,9 +102,9 @@ fn apply_movement_damping(
 
     for (mut linear_velocity, is_grounded) in q_actors.iter_mut() {
         let accel = if is_grounded { ACCEL } else { AIR_ACCEL };
-        let dampened = linear_velocity
+        let dampened_xz = vec2(linear_velocity.x, linear_velocity.z)
             .move_towards(
-                Vec3::ZERO,
+                Vec2::ZERO,
                 if moving {
                     0.0
                 } else {
@@ -113,7 +113,9 @@ fn apply_movement_damping(
             )
             .clamp_length_max(TOP_SPEED);
 
-        **linear_velocity = Vec3::new(dampened.x, linear_velocity.y, dampened.z);
+        // dbg!(dampened_xz);
+
+        **linear_velocity = Vec3::new(dampened_xz.x, linear_velocity.y, dampened_xz.y);
     }
 }
 /// Kinematic bodies do not get pushed by collisions by default,

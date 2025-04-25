@@ -198,7 +198,7 @@ fn add_light(sel: Res<Sel>, map_context: Res<MapContext>, mut mod_events: EventW
         light_type: LightType::Point,
         color: Color::Srgba(css::WHITE),
         intensity: 30000.0,
-        range: 10.0,
+        range: 20.0,
     };
     mod_events.send(MapChange::Add(MapNode::Light(light)));
 }
