@@ -1,3 +1,4 @@
+use avian3d::math::Quaternion;
 use bevy::{
     prelude::*,
     state::state::FreelyMutableState,
@@ -18,6 +19,26 @@ impl IdGen {
     pub fn generate(&mut self) -> Ulid {
         self.0.generate().unwrap()
     }
+}
+
+pub trait FromPitchYawRoll {
+    fn from_pitch_yaw_roll(pitch: f32, yaw: f32, roll: f32) -> Self;
+}
+
+impl FromPitchYawRoll for Quat {
+    fn from_pitch_yaw_roll(pitch: f32, yaw: f32, roll: f32) -> Quat {
+        Quaternion::from_euler(EulerRot::YXZ, pitch, yaw, roll)
+    }
+}
+
+#[derive(Eq, PartialEq, Clone, Copy)]
+pub enum Facing3d {
+    X,
+    NegX,
+    Y,
+    NegY,
+    Z,
+    NegZ,
 }
 
 pub fn enter_state<S: FreelyMutableState>(new_state: S) -> impl Fn(ResMut<NextState<S>>) {

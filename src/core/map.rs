@@ -1,7 +1,10 @@
 pub mod brush;
 
 use crate::{app_data::AppDataPath, core::binds::InputBindingSystem, util::IdGen};
-use avian3d::prelude::{Collider, RigidBody};
+use avian3d::{
+    math::Quaternion,
+    prelude::{Collider, RigidBody},
+};
 use bevy::{
     input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
@@ -326,7 +329,7 @@ fn insert_map_when_loaded(
 fn update_editor_context(mut map: ResMut<MMap>, q_camera: Query<(&GlobalTransform, &Gimbal)>) {
     let (cam_t, cam_g) = q_camera.single();
     let new_context = EditorContext {
-        camera_pos: GimbalPos::gimbal(cam_t.translation(), *cam_g),
+        camera_pos: GimbalPos::new(cam_t.translation(), *cam_g),
     };
     map.editor_context = new_context;
 }
@@ -359,36 +362,6 @@ fn init_empty_map(
         ));
     }
 }
-
-// fn create_new_map_nodes(
-//     mut id_gen: ResMut<IdGen>,
-//     mut create_node_events: EventReader<CreateNewMapNode>,
-//     mut map: ResMut<LiveGameMap>,
-//     mut deploy_events: EventWriter<LiveMapNodeChanged>,
-//     mut commands: Commands,
-// ) {
-//     for event in create_node_events.read() {
-//         info!("creating map node");
-//
-//         let id = id_gen.generate();
-//         let kind = event.0.clone();
-//         let name = kind.name().to_string();
-//
-//         let entity = commands.spawn(MapNode { id, name, kind }).id();
-//         map.node_lookup_table.insert(id, entity);
-//         deploy_events.send(LiveMapNodeChanged(entity));
-//     }
-// }
-
-// fn remove_despawned_entites_from_lookup_table(
-//     mut removals: RemovedComponents<MapNode>,
-//     mut live_map: ResMut<LiveGameMap>,
-// ) {
-//     let removed_despawn: HashSet<Entity> = removals.read().collect();
-//     live_map
-//         .node_lookup_table
-//         .retain(|_, v| !removed_entities.contains(v));
-// }
 
 #[derive(Event)]
 pub enum MMapMod {
@@ -463,11 +436,11 @@ fn reflect_map_changes_in_world(
     if let Some(ref last_map) = *last_map {
         for (node_id, node) in new_map.iter() {
             if let Some(last_node) = last_map.get_node(node_id) {
-                // if node != last_node {
-                // Modify
-                info!("mod {}", node_id);
-                deploy_events.send(MMapNodeDeploy(*node_id));
-                // }
+                if node != last_node {
+                    // Modify
+                    info!("mod {}", node_id);
+                    deploy_events.send(MMapNodeDeploy(*node_id));
+                }
             } else {
                 // Add
                 let entity_id = commands.spawn(node_id.clone()).id();
@@ -532,7 +505,7 @@ fn deploy_nodes(
                 let size = brush.bounds.size();
 
                 entity_commands.insert((
-                    Visibility::Visible,
+                    brush.clone(),
                     Transform::IDENTITY.with_translation(center),
                     RigidBody::Static,
                     Collider::cuboid(size.x, size.y, size.z),
@@ -545,7 +518,7 @@ fn deploy_nodes(
                 let b = ((color >> 16) & 0xFF) as u8;
                 let color = Color::srgb_u8(r, g, b);
 
-                for side in brush.bounds.sides() {
+                for side in brush.bounds.sides_local() {
                     commands
                         .spawn((
                             Transform::IDENTITY.with_translation(side.pos),

@@ -1,28 +1,42 @@
-use bevy::{color::palettes::css, input::common_conditions::input_just_pressed, prelude::*};
+use bevy::{
+    color::palettes::css, ecs::schedule::NodeId, input::common_conditions::input_just_pressed,
+    prelude::*,
+};
 
 use crate::{
     core::{
         binds::InputBindingSystem,
         map::{
             brush::{Brush, BrushBounds},
-            MMapDelta, MMapMod, MMapNodeKind,
+            MMap, MMapContext, MMapDelta, MMapMod, MMapNodeKind,
         },
     },
     editor::selection::{Sel, SelMode},
+    util::Facing3d,
 };
 
-use super::EditorSystems;
+use super::{
+    selection::{SelTarget, SelTargetBrushSide},
+    EditorSystems,
+};
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EditorAction {
     #[default]
     None,
     BuildBrush,
+    ResizeBrush,
 }
 
 #[derive(Resource)]
 pub struct BuildBrushProcess {
     pub start: Vec3,
+}
+
+#[derive(Resource)]
+pub struct ResizeBrushProcess {
+    pub brush_entity_id: Entity,
+    pub side: Facing3d,
 }
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -31,6 +45,8 @@ struct ActionGizmos {}
 fn cancel_action(mut next_editor_action: ResMut<NextState<EditorAction>>) {
     next_editor_action.set(EditorAction::None);
 }
+
+// Action: Building a new brush
 
 fn start_building_brush_here(
     sel: Res<Sel>,
@@ -89,6 +105,43 @@ fn build_brush_cleanup(mut commands: Commands) {
     commands.remove_resource::<BuildBrushProcess>();
 }
 
+// Action: Resizing an existing brush
+
+fn start_resizing_brush(
+    sel_target: Res<SelTarget>,
+    sel_target_brush_side: Res<SelTargetBrushSide>,
+    mut next_editor_action: ResMut<NextState<EditorAction>>,
+    mut commands: Commands,
+) {
+    next_editor_action.set(EditorAction::ResizeBrush);
+    commands.insert_resource(ResizeBrushProcess {
+        brush_entity_id: sel_target.primary.unwrap(),
+        side: sel_target_brush_side.0,
+    });
+    info!("resize brush!");
+}
+
+fn live_brush_resize(sel: Res<Sel>, process: Res<ResizeBrushProcess>, q_brushes: Query<&Brush>) {
+    if let Ok(brush) = q_brushes.get(process.brush_entity_id) {
+        let resized_brush = Brush {
+            bounds: brush.bounds.resized(process.side, sel.position),
+        };
+        dbg!(resized_brush.bounds);
+    } else {
+        warn!(
+            "trying to resize brush with entity that is not a brush: {}",
+            process.brush_entity_id
+        );
+    }
+}
+
+fn end_resizing_brush_here(
+    sel: Res<Sel>,
+    process: Res<ResizeBrushProcess>,
+    mut commands: Commands,
+) {
+}
+
 fn any_action_cleanup(mut next_sel_mode: ResMut<NextState<SelMode>>) {
     // next_sel_mode.set(SelMode::Normal);
 }
@@ -107,13 +160,26 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             PreUpdate,
             (
-                (start_building_brush_here.run_if(input_just_pressed(MouseButton::Left)),)
+                (start_building_brush_here.run_if(
+                    not(resource_exists::<SelTargetBrushSide>)
+                        .and(input_just_pressed(MouseButton::Left)),
+                ),)
+                    .run_if(in_state(EditorAction::None)),
+                (start_resizing_brush.run_if(
+                    resource_exists::<SelTargetBrushSide>
+                        .and(input_just_pressed(MouseButton::Left)),
+                ),)
                     .run_if(in_state(EditorAction::None)),
                 (
                     build_brush_draw_gizmos,
                     end_building_brush_here.run_if(input_just_pressed(MouseButton::Left)),
                 )
                     .run_if(in_state(EditorAction::BuildBrush)),
+                (
+                    live_brush_resize,
+                    end_resizing_brush_here.run_if(input_just_pressed(MouseButton::Left)),
+                )
+                    .run_if(in_state(EditorAction::ResizeBrush)),
                 cancel_action.run_if(
                     not(in_state(EditorAction::None)).and(input_just_pressed(KeyCode::Escape)),
                 ),

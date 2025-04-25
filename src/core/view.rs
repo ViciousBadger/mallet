@@ -1,9 +1,10 @@
-use bevy::{input::mouse::MouseMotion, prelude::*};
+use bevy::{input::mouse::MouseMotion, math::vec2, prelude::*};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     core::binds::{BindingAxis, BindingAxisFns, InputBindingSystem},
     editor::freelook::FreelookState,
+    util::FromPitchYawRoll,
 };
 
 use super::AppState;
@@ -23,6 +24,15 @@ impl Gimbal {
     }
 }
 
+impl FromPitchYawRoll for Gimbal {
+    fn from_pitch_yaw_roll(pitch: f32, yaw: f32, roll: f32) -> Self {
+        Self {
+            pitch_yaw: vec2(pitch, yaw),
+            roll,
+        }
+    }
+}
+
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
 pub struct GimbalPos {
     pub pos: Vec3,
@@ -30,7 +40,7 @@ pub struct GimbalPos {
 }
 
 impl GimbalPos {
-    pub fn gimbal(pos: Vec3, rot: Gimbal) -> Self {
+    pub fn new(pos: Vec3, rot: Gimbal) -> Self {
         Self { pos, rot }
     }
 

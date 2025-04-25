@@ -1,3 +1,5 @@
+use core::f32;
+
 use avian3d::prelude::{AnyCollider, Collider, SpatialQuery, SpatialQueryFilter};
 use bevy::{
     color::palettes::css,
@@ -9,11 +11,15 @@ use bevy::{
     text::cosmic_text::Editor,
     window::PrimaryWindow,
 };
+use itertools::Itertools;
 
 use crate::{
-    core::binds::{Binding, InputBindingSystem},
+    core::{
+        binds::{Binding, InputBindingSystem},
+        map::brush::Brush,
+    },
     editor::freelook::FreelookState,
-    util::input_just_toggled,
+    util::{input_just_toggled, Facing3d},
 };
 
 use super::EditorSystems;
@@ -138,6 +144,9 @@ struct SelAxisGizmos {}
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 struct SelTargetGizmos {}
+
+#[derive(Default, Reflect, GizmoConfigGroup)]
+struct SelHighlightGizmos {}
 
 fn draw_sel_grid_gizmos(sel: Res<Sel>, mut gizmos: Gizmos<SelGridGizmos>) {
     let grid_line_color = css::DIM_GRAY.with_alpha(0.33);
@@ -411,8 +420,50 @@ fn reset_axis_offset(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChang
     sel_changed.send(SelChanged);
 }
 
-// fn sel_brush_test(sel_target: Res<SelTarget>, brushes: Query< mut gizmos: Gizmos<SelTargetGizmos>) {
-// }
+#[derive(Resource, Deref)]
+pub struct SelTargetBrushSide(pub Facing3d);
+
+fn sel_brush_test(
+    sel: Res<Sel>,
+    sel_target: Res<SelTarget>,
+    sel_brush_target_side: Option<Res<SelTargetBrushSide>>,
+    brushes: Query<&Brush>,
+    mut gizmos: Gizmos<SelHighlightGizmos>,
+    mut commands: Commands,
+) {
+    if let Some(target) = sel_target.primary {
+        if let Ok(brush) = brushes.get(target) {
+            let closest_side = brush
+                .bounds
+                .sides_world()
+                .sorted_by(|side_a, side_b| {
+                    sel.position
+                        .distance(side_a.pos)
+                        .total_cmp(&sel.position.distance(side_b.pos))
+                })
+                .next()
+                .unwrap();
+
+            gizmos.rect(
+                Isometry3d::new(
+                    closest_side.pos,
+                    Quat::from_rotation_arc(
+                        Vec3::Y,
+                        closest_side.plane.normal.any_orthonormal_vector(),
+                    ),
+                ),
+                closest_side.plane.half_size * 2.,
+                css::INDIAN_RED,
+            );
+
+            if sel_brush_target_side.is_none_or(|side| side.0 != closest_side.facing) {
+                commands.insert_resource(SelTargetBrushSide(closest_side.facing));
+            }
+        } else if sel_brush_target_side.is_some() {
+            commands.remove_resource::<SelTargetBrushSide>();
+        }
+    }
+}
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<Sel>()
@@ -435,6 +486,14 @@ pub fn plugin(app: &mut App) {
             SelTargetGizmos {},
             GizmoConfig {
                 line_width: 4.0,
+                depth_bias: -0.999,
+                ..default()
+            },
+        )
+        .insert_gizmo_config(
+            SelHighlightGizmos {},
+            GizmoConfig {
+                line_width: 6.0,
                 depth_bias: -1.0,
                 ..default()
             },
@@ -492,6 +551,7 @@ pub fn plugin(app: &mut App) {
                     draw_sel_grid_gizmos,
                     draw_axis_line_gizmos,
                     draw_sel_target_gizmos,
+                    sel_brush_test,
                 ),
             )
                 .chain()
