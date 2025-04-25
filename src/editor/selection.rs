@@ -139,23 +139,24 @@ struct SelAxisGizmos {}
 #[derive(Default, Reflect, GizmoConfigGroup)]
 struct SelTargetGizmos {}
 
-fn draw_sel_gizmos(
-    sel: Res<Sel>,
-    sel_mode: Res<State<SelMode>>,
-    mut grid_gizmos: Gizmos<SelGridGizmos>,
-    mut axis_gizmos: Gizmos<SelAxisGizmos>,
-) {
+fn draw_sel_grid_gizmos(sel: Res<Sel>, mut gizmos: Gizmos<SelGridGizmos>) {
     let grid_line_color = css::DIM_GRAY.with_alpha(0.33);
 
     let mut iso = sel.axis.as_plane().isometry_from_xy(sel.grid_center());
     iso.translation = sel.grid_center().into();
-    grid_gizmos.grid(
+    gizmos.grid(
         iso,
         UVec2::new(SEL_DIST_LIMIT as u32 * 2, SEL_DIST_LIMIT as u32 * 2),
         Vec2::ONE,
         grid_line_color,
     );
+}
 
+fn draw_axis_line_gizmos(
+    sel: Res<Sel>,
+    sel_mode: Res<State<SelMode>>,
+    mut axis_gizmos: Gizmos<SelAxisGizmos>,
+) {
     let sel_color = css::GOLD;
     let min = sel.min_pos();
     let max = sel.max_pos();
@@ -410,6 +411,9 @@ fn reset_axis_offset(mut sel: ResMut<Sel>, mut sel_changed: EventWriter<SelChang
     sel_changed.send(SelChanged);
 }
 
+// fn sel_brush_test(sel_target: Res<SelTarget>, brushes: Query< mut gizmos: Gizmos<SelTargetGizmos>) {
+// }
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<Sel>()
         .init_resource::<SelTarget>()
@@ -484,7 +488,11 @@ pub fn plugin(app: &mut App) {
                 )
                     .run_if(in_state(FreelookState::Unlocked)),
                 find_entites_in_selection.run_if(on_event::<SelChanged>),
-                (draw_sel_gizmos, draw_sel_target_gizmos),
+                (
+                    draw_sel_grid_gizmos,
+                    draw_axis_line_gizmos,
+                    draw_sel_target_gizmos,
+                ),
             )
                 .chain()
                 .in_set(EditorSystems),

@@ -80,6 +80,18 @@ pub enum MMapDelta {
     },
 }
 
+#[derive(Resource)]
+pub struct MMapContext {
+    pub save_path: PathBuf, // Could be in EditorContext but shouldnt be saved.. hmm..
+    pub node_lookup: BiHashMap<MMapNodeId, Entity>,
+}
+
+/// Relevant editor state stored in the map file.
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct EditorContext {
+    pub camera_pos: GimbalPos,
+}
+
 #[derive(Debug)]
 enum MMapOpErr {
     NodeExists,
@@ -234,34 +246,20 @@ impl MMapNodeKind {
     }
 }
 
-#[derive(Resource)]
-pub struct MMapContext {
-    pub save_path: PathBuf,
-    pub node_lookup: BiHashMap<MMapNodeId, Entity>,
-}
-
-impl MMapContext {
-    pub fn node_to_entity(&self, node_id: &MMapNodeId) -> Option<&Entity> {
-        self.node_lookup.get_by_left(node_id)
-    }
-
-    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&MMapNodeId> {
-        self.node_lookup.get_by_right(entity_id)
-    }
-}
-
-/// Relevant editor state stored in the map file.
-#[derive(Serialize, Deserialize, Default, Clone)]
-pub struct EditorContext {
-    pub camera_pos: GimbalPos,
-}
-
 impl MMapContext {
     pub fn new(save_path: PathBuf) -> Self {
         Self {
             save_path,
             node_lookup: default(),
         }
+    }
+
+    pub fn node_to_entity(&self, node_id: &MMapNodeId) -> Option<&Entity> {
+        self.node_lookup.get_by_left(node_id)
+    }
+
+    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&MMapNodeId> {
+        self.node_lookup.get_by_right(entity_id)
     }
 }
 
@@ -465,11 +463,11 @@ fn reflect_map_changes_in_world(
     if let Some(ref last_map) = *last_map {
         for (node_id, node) in new_map.iter() {
             if let Some(last_node) = last_map.get_node(node_id) {
-                if node != last_node {
-                    // Modify
-                    info!("mod {}", node_id);
-                    deploy_events.send(MMapNodeDeploy(*node_id));
-                }
+                // if node != last_node {
+                // Modify
+                info!("mod {}", node_id);
+                deploy_events.send(MMapNodeDeploy(*node_id));
+                // }
             } else {
                 // Add
                 let entity_id = commands.spawn(node_id.clone()).id();
@@ -518,8 +516,10 @@ fn deploy_nodes(
         let node_entity_id = *map_context.node_lookup.get_by_left(&event.0).unwrap();
 
         let mut entity_commands = commands.entity(node_entity_id);
-        entity_commands.retain::<MMapNodeId>();
         entity_commands.despawn_descendants();
+        // NOTE: When this is applied, the Children component will be gone, so it's important to
+        // despawn descendants BEFORE retaining.
+        entity_commands.retain::<MMapNodeId>();
 
         let node = map.get_node(&event.0).unwrap();
 
