@@ -13,12 +13,12 @@ use crate::{
             DeployMapNode, Map, MapChange, MapContext, MapNode,
         },
     },
-    editor::selection::{Sel, SelMode},
+    editor::selection::{SelMode, SpaceCursor},
     util::Facing3d,
 };
 
 use super::{
-    selection::{SelTarget, SelTargetBrushSide},
+    selection::{SelTargetBrushSide, SelectionTargets},
     EditorSystems,
 };
 
@@ -51,7 +51,7 @@ fn cancel_action(mut next_editor_action: ResMut<NextState<EditorAction>>) {
 // Action: Building a new brush
 
 fn start_building_brush_here(
-    sel: Res<Sel>,
+    sel: Res<SpaceCursor>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
     mut commands: Commands,
 ) {
@@ -63,7 +63,7 @@ fn start_building_brush_here(
 
 fn end_building_brush_here(
     process: Res<BuildBrushProcess>,
-    sel: Res<Sel>,
+    sel: Res<SpaceCursor>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
     mut map_changes: EventWriter<MapChange>,
 ) {
@@ -79,7 +79,7 @@ fn end_building_brush_here(
 
 fn build_brush_draw_gizmos(
     process: Res<BuildBrushProcess>,
-    sel: Res<Sel>,
+    sel: Res<SpaceCursor>,
     mut gizmos: Gizmos<ActionGizmos>,
 ) {
     let start = process.start;
@@ -106,21 +106,21 @@ fn build_brush_cleanup(mut commands: Commands) {
 // Action: Resizing an existing brush
 
 fn start_resizing_brush(
-    sel_target: Res<SelTarget>,
+    sel_target: Res<SelectionTargets>,
     sel_target_brush_side: Res<SelTargetBrushSide>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
     mut commands: Commands,
 ) {
     next_editor_action.set(EditorAction::ResizeBrush);
     commands.insert_resource(ResizeBrushProcess {
-        brush_entity_id: sel_target.primary.unwrap(),
+        brush_entity_id: sel_target.focused.unwrap(),
         side: sel_target_brush_side.0,
     });
     info!("resize brush!");
 }
 
 fn live_brush_resize(
-    sel: Res<Sel>,
+    sel: Res<SpaceCursor>,
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
     mut deploy_events: EventWriter<DeployMapNode>,
@@ -142,7 +142,7 @@ fn live_brush_resize(
 }
 
 fn end_resizing_brush_here(
-    sel: Res<Sel>,
+    sel: Res<SpaceCursor>,
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
     map: Res<Map>,
@@ -178,17 +178,21 @@ fn any_action_cleanup(mut next_sel_mode: ResMut<NextState<SelMode>>) {
 }
 
 fn remove_node(
-    sel_target: Res<SelTarget>,
+    sel_target: Res<SelectionTargets>,
     map_context: Res<MapContext>,
     mut mod_events: EventWriter<MapChange>,
 ) {
-    if let Some(entity) = sel_target.primary {
+    if let Some(entity) = sel_target.focused {
         let node_id = map_context.entity_to_node(&entity).unwrap();
         mod_events.send(MapChange::Remove(*node_id));
     }
 }
 
-fn add_light(sel: Res<Sel>, map_context: Res<MapContext>, mut mod_events: EventWriter<MapChange>) {
+fn add_light(
+    sel: Res<SpaceCursor>,
+    map_context: Res<MapContext>,
+    mut mod_events: EventWriter<MapChange>,
+) {
     let light = Light {
         position: sel.position,
         light_type: LightType::Point,
