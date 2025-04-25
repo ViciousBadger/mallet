@@ -66,13 +66,6 @@ fn init_game(mut commands: Commands, init_conf: Option<Res<GameRules>>) {
             GimbalRotatesParent,
         ))
         .set_parent(player);
-
-    // test light
-    commands.spawn((
-        StateScoped(AppState::InGame),
-        DirectionalLight::default(),
-        Transform::from_rotation(Quat::from_rotation_x(-0.8)),
-    ));
 }
 
 fn teardown_game(_: Commands) {

@@ -108,7 +108,7 @@ impl MMap {
         self.state.keys()
     }
 
-    pub fn nodes_with_id(&self) -> impl Iterator<Item = (&MMapNodeId, &MMapNode)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&MMapNodeId, &MMapNode)> {
         self.state.iter()
     }
 
@@ -463,7 +463,7 @@ fn reflect_map_changes_in_world(
     info!("reflecting map changes !!");
 
     if let Some(ref last_map) = *last_map {
-        for (node_id, node) in new_map.nodes_with_id() {
+        for (node_id, node) in new_map.iter() {
             if let Some(last_node) = last_map.get_node(node_id) {
                 if node != last_node {
                     // Modify

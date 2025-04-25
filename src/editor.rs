@@ -36,11 +36,6 @@ fn init_editor(mut commands: Commands, existing_map: Option<Res<MMap>>) {
             ..default()
         }),
     ));
-    commands.spawn((
-        StateScoped(AppState::InEditor),
-        DirectionalLight::default(),
-        Transform::from_rotation(Quat::from_rotation_x(-0.8)),
-    ));
 }
 
 fn teardown_editor(_: Commands) {
