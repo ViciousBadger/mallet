@@ -459,9 +459,10 @@ fn sel_brush_test(
             if sel_brush_target_side.is_none_or(|side| side.0 != closest_side.facing) {
                 commands.insert_resource(SelTargetBrushSide(closest_side.facing));
             }
-        } else if sel_brush_target_side.is_some() {
-            commands.remove_resource::<SelTargetBrushSide>();
         }
+    } else if sel_brush_target_side.is_some() {
+        info!("fucking off");
+        commands.remove_resource::<SelTargetBrushSide>();
     }
 }
 

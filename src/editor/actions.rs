@@ -1,5 +1,7 @@
 use bevy::{
-    color::palettes::css, ecs::schedule::NodeId, input::common_conditions::input_just_pressed,
+    color::palettes::css,
+    ecs::schedule::NodeId,
+    input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
 };
 
@@ -8,7 +10,7 @@ use crate::{
         binds::InputBindingSystem,
         map::{
             brush::{Brush, BrushBounds},
-            MMap, MMapContext, MMapDelta, MMapMod, MMapNodeKind,
+            MMap, MMapContext, MMapDelta, MMapMod, MMapNodeDeploy, MMapNodeKind,
         },
     },
     editor::selection::{Sel, SelMode},
@@ -121,12 +123,20 @@ fn start_resizing_brush(
     info!("resize brush!");
 }
 
-fn live_brush_resize(sel: Res<Sel>, process: Res<ResizeBrushProcess>, q_brushes: Query<&Brush>) {
+fn live_brush_resize(
+    sel: Res<Sel>,
+    process: Res<ResizeBrushProcess>,
+    q_brushes: Query<&Brush>,
+    mut deploy_events: EventWriter<MMapNodeDeploy>,
+) {
     if let Ok(brush) = q_brushes.get(process.brush_entity_id) {
         let resized_brush = Brush {
             bounds: brush.bounds.resized(process.side, sel.position),
         };
-        dbg!(resized_brush.bounds);
+        deploy_events.send(MMapNodeDeploy {
+            entity_id: process.brush_entity_id,
+            node_kind: MMapNodeKind::Brush(resized_brush),
+        });
     } else {
         warn!(
             "trying to resize brush with entity that is not a brush: {}",
@@ -138,8 +148,33 @@ fn live_brush_resize(sel: Res<Sel>, process: Res<ResizeBrushProcess>, q_brushes:
 fn end_resizing_brush_here(
     sel: Res<Sel>,
     process: Res<ResizeBrushProcess>,
-    mut commands: Commands,
+    q_brushes: Query<&Brush>,
+    map: Res<MMap>,
+    map_context: Res<MMapContext>,
+    mut mod_events: EventWriter<MMapMod>,
+    mut next_editor_action: ResMut<NextState<EditorAction>>,
 ) {
+    if let Ok(brush) = q_brushes.get(process.brush_entity_id) {
+        let resized_brush = Brush {
+            bounds: brush.bounds.resized(process.side, sel.position),
+        };
+        let node_id = map_context
+            .entity_to_node(&process.brush_entity_id)
+            .unwrap();
+        let mut modified_node = map.get_node(node_id).unwrap().clone();
+        modified_node.kind = MMapNodeKind::Brush(resized_brush);
+        mod_events.send(MMapMod::Modify(*node_id, modified_node));
+        next_editor_action.set(EditorAction::None);
+    } else {
+        warn!(
+            "trying to resize brush with entity that is not a brush: {}",
+            process.brush_entity_id
+        );
+    }
+}
+
+fn resize_brush_cleanup(mut commands: Commands) {
+    commands.remove_resource::<ResizeBrushProcess>();
 }
 
 fn any_action_cleanup(mut next_sel_mode: ResMut<NextState<SelMode>>) {
@@ -177,7 +212,7 @@ pub fn plugin(app: &mut App) {
                     .run_if(in_state(EditorAction::BuildBrush)),
                 (
                     live_brush_resize,
-                    end_resizing_brush_here.run_if(input_just_pressed(MouseButton::Left)),
+                    end_resizing_brush_here.run_if(input_just_released(MouseButton::Left)),
                 )
                     .run_if(in_state(EditorAction::ResizeBrush)),
                 cancel_action.run_if(
@@ -188,5 +223,6 @@ pub fn plugin(app: &mut App) {
                 .in_set(EditorSystems),
         )
         .add_systems(OnExit(EditorAction::BuildBrush), build_brush_cleanup)
+        .add_systems(OnExit(EditorAction::ResizeBrush), resize_brush_cleanup)
         .add_systems(OnEnter(EditorAction::None), any_action_cleanup);
 }

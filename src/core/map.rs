@@ -13,7 +13,7 @@ use bevy::{
 use bimap::BiHashMap;
 use brush::Brush;
 use daggy::{Dag, NodeIndex, Walker};
-use rand::RngCore;
+use rand::{RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs::File, path::PathBuf};
 use ulid::{serde::ulid_as_u128, Ulid};
@@ -371,7 +371,10 @@ pub enum MMapMod {
 }
 
 #[derive(Event)]
-struct MMapNodeDeploy(pub MMapNodeId);
+pub struct MMapNodeDeploy {
+    pub entity_id: Entity,
+    pub node_kind: MMapNodeKind,
+}
 
 fn map_mod_to_delta(
     mut id_gen: ResMut<IdGen>,
@@ -439,13 +442,22 @@ fn reflect_map_changes_in_world(
                 if node != last_node {
                     // Modify
                     info!("mod {}", node_id);
-                    deploy_events.send(MMapNodeDeploy(*node_id));
+                    let entity_id = *map_context
+                        .node_to_entity(node_id)
+                        .expect("Modified node to already be instantiated in world");
+                    deploy_events.send(MMapNodeDeploy {
+                        entity_id,
+                        node_kind: node.kind.clone(),
+                    });
                 }
             } else {
                 // Add
                 let entity_id = commands.spawn(node_id.clone()).id();
                 map_context.node_lookup.insert(*node_id, entity_id);
-                deploy_events.send(MMapNodeDeploy(*node_id));
+                deploy_events.send(MMapNodeDeploy {
+                    entity_id,
+                    node_kind: node.kind.clone(),
+                });
                 info!("add {}", entity_id);
             }
         }
@@ -464,10 +476,13 @@ fn reflect_map_changes_in_world(
         }
     } else {
         // Nothing to compare with, add all.
-        for node_id in new_map.node_ids() {
+        for (node_id, node) in new_map.iter() {
             let entity_id = commands.spawn(node_id.clone()).id();
             map_context.node_lookup.insert(*node_id, entity_id);
-            deploy_events.send(MMapNodeDeploy(*node_id));
+            deploy_events.send(MMapNodeDeploy {
+                entity_id,
+                node_kind: node.kind.clone(),
+            });
             info!("add (nothing b4) {}", entity_id);
         }
     }
@@ -476,29 +491,21 @@ fn reflect_map_changes_in_world(
 }
 
 fn deploy_nodes(
-    map: Res<MMap>,
-    map_context: Res<MMapContext>,
     mut deploy_events: EventReader<MMapNodeDeploy>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    info!("deplopy");
     for event in deploy_events.read() {
-        let node_id = event.0;
-        let node_entity_id = *map_context.node_lookup.get_by_left(&event.0).unwrap();
-
-        let mut entity_commands = commands.entity(node_entity_id);
+        let mut entity_commands = commands.entity(event.entity_id);
         entity_commands.despawn_descendants();
         // NOTE: When this is applied, the Children component will be gone, so it's important to
         // despawn descendants BEFORE retaining.
         entity_commands.retain::<MMapNodeId>();
 
-        let node = map.get_node(&event.0).unwrap();
-
         // Once this match is stupid large it should be split up. Perhaps using observer pattern,
         // fire an event using MapNodeKind generic. Register listeners for each kind.
-        match &node.kind {
+        match &event.node_kind {
             MMapNodeKind::Brush(ref brush) => {
                 // Brush will use base entity as a container for sides.
                 let center = brush.bounds.center();
@@ -511,7 +518,7 @@ fn deploy_nodes(
                     Collider::cuboid(size.x, size.y, size.z),
                 ));
 
-                let mut rng = WyRand::new(node_id.0 .0 as u64);
+                let mut rng = WyRand::from_os_rng();
                 let color = rng.next_u32();
                 let r = (color & 0xFF) as u8;
                 let g = ((color >> 8) & 0xFF) as u8;
@@ -525,7 +532,7 @@ fn deploy_nodes(
                             Mesh3d(meshes.add(side.plane.mesh())),
                             MeshMaterial3d(materials.add(color)),
                         ))
-                        .set_parent(node_entity_id);
+                        .set_parent(event.entity_id);
                 }
             }
         }
@@ -557,9 +564,8 @@ pub fn plugin(app: &mut App) {
                     .run_if(resource_exists::<MMap>.and(on_event::<AppExit>)),
                 insert_map_when_loaded.run_if(resource_exists::<LoadingMMap>),
                 map_mod_to_delta.run_if(resource_exists::<MMap>),
-                (reflect_map_changes_in_world, deploy_nodes)
-                    .chain()
-                    .run_if(resource_exists_and_changed::<MMap>),
+                reflect_map_changes_in_world.run_if(resource_exists_and_changed::<MMap>),
+                deploy_nodes.after(reflect_map_changes_in_world),
             ),
         );
 }
