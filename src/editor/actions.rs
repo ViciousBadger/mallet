@@ -10,7 +10,11 @@ use crate::{
         binds::InputBindingSystem,
         map::{
             brush::{Brush, BrushBounds},
-            MMap, MMapContext, MMapDelta, MMapMod, MMapNodeDeploy, MMapNodeKind,
+            light::{
+                Light,
+                LightType::{self, Point},
+            },
+            DeployMapNode, Map, MapChange, MapContext, MapDelta, MapNode,
         },
     },
     editor::selection::{Sel, SelMode},
@@ -65,18 +69,14 @@ fn end_building_brush_here(
     process: Res<BuildBrushProcess>,
     sel: Res<Sel>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
-    mut map_mods: EventWriter<MMapMod>,
+    mut map_changes: EventWriter<MapChange>,
 ) {
     let start = process.start;
     let end = sel.position;
     let bounds = BrushBounds::new(start, end);
 
     if bounds.is_valid() {
-        // do the thing
-        //map.push(MMapDelta::AddNode { id: hgg, node: () }
-        //new_map_node_events.send(CreateNewMapNode(MMapNodeKind::Brush(Brush { bounds })));
-
-        map_mods.send(MMapMod::Add(MMapNodeKind::Brush(Brush { bounds })));
+        map_changes.send(MapChange::Add(MapNode::Brush(Brush { bounds })));
         next_editor_action.set(EditorAction::None);
     }
 }
@@ -127,15 +127,15 @@ fn live_brush_resize(
     sel: Res<Sel>,
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
-    mut deploy_events: EventWriter<MMapNodeDeploy>,
+    mut deploy_events: EventWriter<DeployMapNode>,
 ) {
     if let Ok(brush) = q_brushes.get(process.brush_entity_id) {
         let resized_brush = Brush {
             bounds: brush.bounds.resized(process.side, sel.position),
         };
-        deploy_events.send(MMapNodeDeploy {
+        deploy_events.send(DeployMapNode {
             entity_id: process.brush_entity_id,
-            node_kind: MMapNodeKind::Brush(resized_brush),
+            node: MapNode::Brush(resized_brush),
         });
     } else {
         warn!(
@@ -149,21 +149,21 @@ fn end_resizing_brush_here(
     sel: Res<Sel>,
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
-    map: Res<MMap>,
-    map_context: Res<MMapContext>,
-    mut mod_events: EventWriter<MMapMod>,
+    map: Res<Map>,
+    map_context: Res<MapContext>,
+    mut mod_events: EventWriter<MapChange>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
 ) {
     if let Ok(brush) = q_brushes.get(process.brush_entity_id) {
-        let resized_brush = Brush {
-            bounds: brush.bounds.resized(process.side, sel.position),
-        };
+        let resized_bounds = brush.bounds.resized(process.side, sel.position);
         let node_id = map_context
             .entity_to_node(&process.brush_entity_id)
             .unwrap();
-        let mut modified_node = map.get_node(node_id).unwrap().clone();
-        modified_node.kind = MMapNodeKind::Brush(resized_brush);
-        mod_events.send(MMapMod::Modify(*node_id, modified_node));
+        let MapNode::Brush(mut brush) = map.get_node(node_id).unwrap().clone() else {
+            panic!("notabrush")
+        };
+        brush.bounds = resized_bounds;
+        mod_events.send(MapChange::Modify(*node_id, MapNode::Brush(brush)));
         next_editor_action.set(EditorAction::None);
     } else {
         warn!(
@@ -183,13 +183,24 @@ fn any_action_cleanup(mut next_sel_mode: ResMut<NextState<SelMode>>) {
 
 fn remove_node(
     sel_target: Res<SelTarget>,
-    map_context: Res<MMapContext>,
-    mut mod_events: EventWriter<MMapMod>,
+    map_context: Res<MapContext>,
+    mut mod_events: EventWriter<MapChange>,
 ) {
     if let Some(entity) = sel_target.primary {
         let node_id = map_context.entity_to_node(&entity).unwrap();
-        mod_events.send(MMapMod::Remove(*node_id));
+        mod_events.send(MapChange::Remove(*node_id));
     }
+}
+
+fn add_light(sel: Res<Sel>, map_context: Res<MapContext>, mut mod_events: EventWriter<MapChange>) {
+    let light = Light {
+        position: sel.position,
+        light_type: LightType::Point,
+        color: Color::Srgba(css::WHITE),
+        intensity: 30000.0,
+        range: 10.0,
+    };
+    mod_events.send(MapChange::Add(MapNode::Light(light)));
 }
 
 pub fn plugin(app: &mut App) {
@@ -215,10 +226,8 @@ pub fn plugin(app: &mut App) {
                         resource_exists::<SelTargetBrushSide>
                             .and(input_just_pressed(MouseButton::Left)),
                     ),
-                    remove_node.run_if(
-                        resource_exists::<SelTargetBrushSide>
-                            .and(input_just_pressed(KeyCode::Delete)),
-                    ),
+                    remove_node.run_if(input_just_pressed(KeyCode::Delete)),
+                    add_light.run_if(input_just_pressed(KeyCode::KeyI)),
                 )
                     .run_if(in_state(EditorAction::None)),
                 (

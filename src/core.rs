@@ -20,7 +20,7 @@ fn init(mut commands: Commands) {
     commands.spawn((
         StudioLight,
         DirectionalLight {
-            illuminance: 10_000.,
+            illuminance: 1_500.,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(
@@ -34,7 +34,7 @@ fn init(mut commands: Commands) {
     commands.spawn((
         StudioLight,
         DirectionalLight {
-            illuminance: 5_000.,
+            illuminance: 1_000.,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(
@@ -48,7 +48,7 @@ fn init(mut commands: Commands) {
     commands.spawn((
         StudioLight,
         DirectionalLight {
-            illuminance: 1_000.,
+            illuminance: 300.,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(

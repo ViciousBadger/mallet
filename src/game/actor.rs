@@ -50,9 +50,11 @@ fn update_grounded(
     }
 }
 
-const ACCEL: f32 = 70.0;
-const TOP_SPEED: f32 = 7.0;
+const ACCEL: f32 = 60.0;
+const AIR_ACCEL: f32 = 30.0;
+const TOP_SPEED: f32 = 6.0;
 const GRAV: f32 = 9.81 * 2.0;
+const JUMP: f32 = 8.0;
 
 fn apply_gravity(time: Res<Time>, mut q_actors: Query<&mut LinearVelocity, With<PlayerActor>>) {
     let gravity = Vec3::NEG_Y * GRAV;
@@ -67,21 +69,21 @@ fn movement(
     mut controllers: Query<(&GlobalTransform, &mut LinearVelocity, Has<Grounded>)>,
 ) {
     let delta_time = time.delta_secs();
-    let jump_impulse = 7.0;
 
     for event in movement_event_reader.read() {
         for (transform, mut linear_velocity, is_grounded) in &mut controllers {
+            let accel = if is_grounded { ACCEL } else { AIR_ACCEL };
             match event {
                 MovementAction::Move(direction) => {
                     let rot = Rot2::radians(-transform.rotation().to_euler(EulerRot::YXZ).0);
                     let rotated_dir = rot * *direction;
 
-                    linear_velocity.x += rotated_dir.x * ACCEL * delta_time;
-                    linear_velocity.z += rotated_dir.y * ACCEL * delta_time;
+                    linear_velocity.x += rotated_dir.x * accel * delta_time;
+                    linear_velocity.z += rotated_dir.y * accel * delta_time;
                 }
                 MovementAction::Jump => {
                     if is_grounded {
-                        linear_velocity.y = jump_impulse;
+                        linear_velocity.y = JUMP;
                     }
                 }
             }
@@ -92,20 +94,21 @@ fn movement(
 fn apply_movement_damping(
     time: Res<Time>,
     mut movement_event_reader: EventReader<MovementAction>,
-    mut q_actors: Query<&mut LinearVelocity, With<PlayerActor>>,
+    mut q_actors: Query<(&mut LinearVelocity, Has<Grounded>), With<PlayerActor>>,
 ) {
     let moving = movement_event_reader
         .read()
         .any(|event| matches!(event, MovementAction::Move(..)));
 
-    for mut linear_velocity in q_actors.iter_mut() {
+    for (mut linear_velocity, is_grounded) in q_actors.iter_mut() {
+        let accel = if is_grounded { ACCEL } else { AIR_ACCEL };
         let dampened = linear_velocity
             .move_towards(
                 Vec3::ZERO,
                 if moving {
                     0.0
                 } else {
-                    time.delta_secs() * ACCEL
+                    time.delta_secs() * accel
                 },
             )
             .clamp_length_max(TOP_SPEED);

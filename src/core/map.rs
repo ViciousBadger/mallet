@@ -1,8 +1,10 @@
 pub mod brush;
+pub mod light;
 
 use crate::{app_data::AppDataPath, core::binds::InputBindingSystem, util::IdGen};
 use avian3d::{
     math::Quaternion,
+    parry::either::IntoEither,
     prelude::{Collider, RigidBody},
 };
 use bevy::{
@@ -13,6 +15,7 @@ use bevy::{
 use bimap::BiHashMap;
 use brush::Brush;
 use daggy::{Dag, NodeIndex, Walker};
+use light::Light;
 use rand::{RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs::File, path::PathBuf};
@@ -25,13 +28,14 @@ use super::{
 };
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
-pub struct MMap {
-    state: BTreeMap<MMapNodeId, MMapNode>,
+pub struct Map {
+    state: BTreeMap<MapNodeId, MapNode>,
     cur_delta_idx: NodeIndex<u32>,
-    delta_graph: Dag<MMapDelta, ()>,
+    delta_graph: Dag<MapDelta, ()>,
     pub editor_context: EditorContext,
 }
 
+/// Special persistent identifier for map nodes.
 #[derive(
     Deref,
     Debug,
@@ -46,48 +50,60 @@ pub struct MMap {
     Deserialize,
     Component,
 )]
-pub struct MMapNodeId(#[serde(with = "ulid_as_u128")] Ulid);
+pub struct MapNodeId(#[serde(with = "ulid_as_u128")] Ulid);
 
-impl std::fmt::Display for MMapNodeId {
+impl std::fmt::Display for MapNodeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
-pub struct MMapNode {
-    pub name: String,
-    pub kind: MMapNodeKind,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
-pub enum MMapNodeKind {
+pub enum MapNode {
     Brush(Brush),
+    Light(Light),
 }
 
+/// Represents a proposed change to the map.
+#[derive(Event)]
+pub enum MapChange {
+    Add(MapNode),
+    Modify(MapNodeId, MapNode),
+    Remove(MapNodeId),
+}
+
+/// Request to deploy a map node in the world. Entity id is expected to be an entity with a MapNodeId component.
+/// MapNode can be different from the one stored in the Map, to make temporary node changes in the editor.
+#[derive(Event)]
+pub struct DeployMapNode {
+    pub entity_id: Entity,
+    pub node: MapNode,
+}
+
+/// A "symmetric" map change that stores enough data to be reversable.
 #[derive(Serialize, Deserialize, Clone)]
-pub enum MMapDelta {
+pub enum MapDelta {
     Nop,
     AddNode {
-        id: MMapNodeId,
-        node: MMapNode,
+        id: MapNodeId,
+        node: MapNode,
     },
     ModifyNode {
-        id: MMapNodeId,
-        before: MMapNode,
-        after: MMapNode,
+        id: MapNodeId,
+        before: MapNode,
+        after: MapNode,
     },
     RemoveNode {
-        id: MMapNodeId,
-        node: MMapNode,
+        id: MapNodeId,
+        node: MapNode,
     },
 }
 
 /// Things that are part of map but not saved.
 #[derive(Resource)]
-pub struct MMapContext {
+pub struct MapContext {
     pub save_path: PathBuf, // Could be in EditorContext but shouldnt be saved.. hmm..
-    pub node_lookup: BiHashMap<MMapNodeId, Entity>,
+    pub node_lookup: BiHashMap<MapNodeId, Entity>,
 }
 
 #[derive(Resource)]
@@ -102,15 +118,15 @@ pub struct EditorContext {
 }
 
 #[derive(Debug)]
-enum MMapOpErr {
+enum MapDeltaApplyError {
     NodeExists,
     NodeNotFound,
 }
 
-impl Default for MMap {
+impl Default for Map {
     fn default() -> Self {
-        let mut graph: Dag<MMapDelta, ()> = Dag::new();
-        let root_node = graph.add_node(MMapDelta::Nop);
+        let mut graph: Dag<MapDelta, ()> = Dag::new();
+        let root_node = graph.add_node(MapDelta::Nop);
         Self {
             state: BTreeMap::new(),
             cur_delta_idx: root_node,
@@ -120,28 +136,28 @@ impl Default for MMap {
     }
 }
 
-impl MMap {
-    pub fn nodes(&self) -> impl Iterator<Item = &MMapNode> {
+impl Map {
+    pub fn nodes(&self) -> impl Iterator<Item = &MapNode> {
         self.state.values()
     }
 
-    pub fn node_ids(&self) -> impl Iterator<Item = &MMapNodeId> {
+    pub fn node_ids(&self) -> impl Iterator<Item = &MapNodeId> {
         self.state.keys()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&MMapNodeId, &MMapNode)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&MapNodeId, &MapNode)> {
         self.state.iter()
     }
 
-    pub fn get_node(&self, id: &MMapNodeId) -> Option<&MMapNode> {
+    pub fn get_node(&self, id: &MapNodeId) -> Option<&MapNode> {
         self.state.get(id)
     }
 
-    pub fn has_node(&self, id: &MMapNodeId) -> bool {
+    pub fn has_node(&self, id: &MapNodeId) -> bool {
         self.state.contains_key(id)
     }
 
-    pub fn push(&mut self, new_delta: MMapDelta) {
+    pub fn push(&mut self, new_delta: MapDelta) {
         self.apply(&new_delta).unwrap();
         let (_new_edge, new_node) =
             self.delta_graph
@@ -197,49 +213,48 @@ impl MMap {
         self.cur_delta_idx = child_node_idx;
     }
 
-    fn apply(&mut self, action: &MMapDelta) -> Result<(), MMapOpErr> {
+    fn apply(&mut self, action: &MapDelta) -> Result<(), MapDeltaApplyError> {
         match action {
-            MMapDelta::Nop => Ok(()),
-            MMapDelta::AddNode { id, node } => {
+            MapDelta::Nop => Ok(()),
+            MapDelta::AddNode { id, node } => {
                 if self.state.insert(*id, node.clone()).is_none() {
                     Ok(())
                 } else {
-                    Err(MMapOpErr::NodeExists)
+                    Err(MapDeltaApplyError::NodeExists)
                 }
             }
-            MMapDelta::ModifyNode { id, after, .. } => {
+            MapDelta::ModifyNode { id, after, .. } => {
                 if let Some(node) = self.state.get_mut(id) {
                     *node = after.clone();
                     Ok(())
                 } else {
-                    Err(MMapOpErr::NodeNotFound)
+                    Err(MapDeltaApplyError::NodeNotFound)
                 }
             }
-            MMapDelta::RemoveNode { id, .. } => {
+            MapDelta::RemoveNode { id, .. } => {
                 if self.state.remove(id).is_some() {
                     Ok(())
                 } else {
-                    Err(MMapOpErr::NodeNotFound)
+                    Err(MapDeltaApplyError::NodeNotFound)
                 }
             }
         }
     }
 }
-
-impl MMapDelta {
-    pub fn reverse_of(&self) -> MMapDelta {
+impl MapDelta {
+    pub fn reverse_of(&self) -> MapDelta {
         match self {
-            MMapDelta::Nop => MMapDelta::Nop,
-            MMapDelta::AddNode { id, node } => MMapDelta::RemoveNode {
+            MapDelta::Nop => MapDelta::Nop,
+            MapDelta::AddNode { id, node } => MapDelta::RemoveNode {
                 id: *id,
                 node: node.clone(),
             },
-            MMapDelta::ModifyNode { id, before, after } => MMapDelta::ModifyNode {
+            MapDelta::ModifyNode { id, before, after } => MapDelta::ModifyNode {
                 id: *id,
                 before: after.clone(),
                 after: before.clone(),
             },
-            MMapDelta::RemoveNode { id, node } => MMapDelta::AddNode {
+            MapDelta::RemoveNode { id, node } => MapDelta::AddNode {
                 id: *id,
                 node: node.clone(),
             },
@@ -247,31 +262,32 @@ impl MMapDelta {
     }
 }
 
-impl MMapNodeKind {
+impl MapNode {
     pub fn name(&self) -> &'static str {
         match self {
-            MMapNodeKind::Brush(_) => "Brush",
+            MapNode::Brush(..) => "Brush",
+            MapNode::Light(..) => "Light",
         }
     }
 }
 
-impl MMapContext {
-    pub fn node_to_entity(&self, node_id: &MMapNodeId) -> Option<&Entity> {
+impl MapContext {
+    pub fn node_to_entity(&self, node_id: &MapNodeId) -> Option<&Entity> {
         self.node_lookup.get_by_left(node_id)
     }
 
-    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&MMapNodeId> {
+    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&MapNodeId> {
         self.node_lookup.get_by_right(entity_id)
     }
 }
 
 #[derive(Resource)]
-struct LoadingMMap {
+struct LoadingMap {
     path: PathBuf,
-    task: Task<MMapLoadResult>,
+    task: Task<MapLoadResult>,
 }
 
-pub type MMapLoadResult = Result<MMap, postcard::Error>;
+pub type MapLoadResult = Result<Map, postcard::Error>;
 
 pub const MAP_FILE_EXT: &str = "mmap";
 pub const DEFAULT_MAP_NAME: &str = "map";
@@ -285,7 +301,7 @@ fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
     if path.exists() {
         let task_owned_path = path.clone();
         let task_pool = AsyncComputeTaskPool::get();
-        commands.insert_resource(LoadingMMap {
+        commands.insert_resource(LoadingMap {
             path,
             task: task_pool.spawn(load_map_async(task_owned_path)),
         });
@@ -294,32 +310,32 @@ fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
             "no map file found at {}. inserting empty map",
             path.display()
         );
-        commands.insert_resource(MMap::default());
-        commands.insert_resource(MMapContext {
+        commands.insert_resource(Map::default());
+        commands.insert_resource(MapContext {
             save_path: path.clone(),
             node_lookup: default(),
         });
     }
 }
 
-async fn load_map_async(path: PathBuf) -> MMapLoadResult {
+async fn load_map_async(path: PathBuf) -> MapLoadResult {
     let bytes = std::fs::read(path).unwrap();
-    postcard::from_bytes::<MMap>(&bytes)
+    postcard::from_bytes::<Map>(&bytes)
 }
 
 fn insert_map_when_loaded(
-    mut loading_map: ResMut<LoadingMMap>,
+    mut loading_map: ResMut<LoadingMap>,
     mut commands: Commands,
     mut tp_writer: EventWriter<TPCameraTo>,
 ) {
     if let Some(map_result) = block_on(future::poll_once(&mut loading_map.task)) {
-        commands.remove_resource::<LoadingMMap>();
+        commands.remove_resource::<LoadingMap>();
 
         match map_result {
             Ok(map) => {
                 tp_writer.send(TPCameraTo(map.editor_context.camera_pos));
                 commands.insert_resource(map);
-                commands.insert_resource(MMapContext {
+                commands.insert_resource(MapContext {
                     save_path: loading_map.path.clone(),
                     node_lookup: default(),
                 });
@@ -331,7 +347,7 @@ fn insert_map_when_loaded(
     }
 }
 
-fn update_editor_context(mut map: ResMut<MMap>, q_camera: Query<(&GlobalTransform, &Gimbal)>) {
+fn update_editor_context(mut map: ResMut<Map>, q_camera: Query<(&GlobalTransform, &Gimbal)>) {
     let (cam_t, cam_g) = q_camera.single();
     let new_context = EditorContext {
         camera_pos: GimbalPos::new(cam_t.translation(), *cam_g),
@@ -339,30 +355,29 @@ fn update_editor_context(mut map: ResMut<MMap>, q_camera: Query<(&GlobalTransfor
     map.editor_context = new_context;
 }
 
-fn save_map(map: Res<MMap>, map_context: Res<MMapContext>) {
+fn save_map(map: Res<Map>, map_context: Res<MapContext>) {
     // TODO: async, of course this would mean it can't run on AppExit.
 
     let file = File::create(&map_context.save_path).unwrap();
     postcard::to_io(map.into_inner(), file).unwrap();
 }
 
-fn unload_map(q_live_nodes: Query<Entity, With<MMapNodeId>>, mut commands: Commands) {
+fn unload_map(q_live_nodes: Query<Entity, With<MapNodeId>>, mut commands: Commands) {
     info!("unload map with {} nodes", q_live_nodes.iter().count());
     for entity in q_live_nodes.iter() {
         commands.entity(entity).despawn_recursive();
     }
-    commands.remove_resource::<MMap>();
-    // commands.remove_resource::<MMapContext>();
+    commands.remove_resource::<Map>();
 }
 
 fn init_empty_map(
     data_path: Res<AppDataPath>,
-    map_context: Option<Res<MMapContext>>,
+    map_context: Option<Res<MapContext>>,
     mut commands: Commands,
 ) {
-    commands.insert_resource(MMap::default());
+    commands.insert_resource(Map::default());
     if map_context.is_none() {
-        commands.insert_resource(MMapContext {
+        commands.insert_resource(MapContext {
             save_path: [data_path.get(), &default_map_filename()].iter().collect(),
             node_lookup: default(),
         });
@@ -378,6 +393,8 @@ fn load_map_assets(
 
     let material = materials.add(StandardMaterial {
         base_color_texture: Some(texture),
+        perceptual_roughness: 1.0,
+        reflectance: 0.0,
         ..default()
     });
 
@@ -386,45 +403,29 @@ fn load_map_assets(
     });
 }
 
-#[derive(Event)]
-pub enum MMapMod {
-    Add(MMapNodeKind),
-    Modify(MMapNodeId, MMapNode),
-    Remove(MMapNodeId),
-}
-
-#[derive(Event)]
-pub struct MMapNodeDeploy {
-    pub entity_id: Entity,
-    pub node_kind: MMapNodeKind,
-}
-
-fn map_mod_to_delta(
+fn apply_changes_to_map(
     mut id_gen: ResMut<IdGen>,
-    mut mod_events: EventReader<MMapMod>,
-    mut map: ResMut<MMap>,
+    mut mod_events: EventReader<MapChange>,
+    mut map: ResMut<Map>,
 ) {
     for mod_event in mod_events.read() {
         info!("mod event!");
         let delta = match mod_event {
-            MMapMod::Add(node_kind) => MMapDelta::AddNode {
-                id: MMapNodeId(id_gen.generate()),
-                node: MMapNode {
-                    name: node_kind.name().to_string(),
-                    kind: node_kind.clone(),
-                },
+            MapChange::Add(node) => MapDelta::AddNode {
+                id: MapNodeId(id_gen.generate()),
+                node: node.clone(),
             },
-            MMapMod::Modify(node_id, node) => {
+            MapChange::Modify(node_id, node) => {
                 let prev = map.get_node(node_id).unwrap();
-                MMapDelta::ModifyNode {
+                MapDelta::ModifyNode {
                     id: *node_id,
                     before: prev.clone(),
                     after: node.clone(),
                 }
             }
-            MMapMod::Remove(node_id) => {
+            MapChange::Remove(node_id) => {
                 let prev = map.get_node(node_id).unwrap();
-                MMapDelta::RemoveNode {
+                MapDelta::RemoveNode {
                     id: *node_id,
                     node: prev.clone(),
                 }
@@ -434,7 +435,7 @@ fn map_mod_to_delta(
     }
 }
 
-pub fn map_undo(mut map: ResMut<MMap>) {
+pub fn undo_map_change(mut map: ResMut<Map>) {
     if map.can_undo() {
         map.undo();
     } else {
@@ -442,7 +443,7 @@ pub fn map_undo(mut map: ResMut<MMap>) {
     }
 }
 
-pub fn map_redo(mut map: ResMut<MMap>) {
+pub fn redo_map_change(mut map: ResMut<Map>) {
     if map.can_redo() {
         map.redo();
     } else {
@@ -451,10 +452,10 @@ pub fn map_redo(mut map: ResMut<MMap>) {
 }
 
 fn reflect_map_changes_in_world(
-    mut last_map: Local<Option<MMap>>,
-    new_map: Res<MMap>,
-    mut map_context: ResMut<MMapContext>,
-    mut deploy_events: EventWriter<MMapNodeDeploy>,
+    mut last_map: Local<Option<Map>>,
+    new_map: Res<Map>,
+    mut map_context: ResMut<MapContext>,
+    mut deploy_events: EventWriter<DeployMapNode>,
     mut commands: Commands,
 ) {
     info!("reflecting map changes !!");
@@ -468,18 +469,18 @@ fn reflect_map_changes_in_world(
                     let entity_id = *map_context
                         .node_to_entity(node_id)
                         .expect("Modified node to already be instantiated in world");
-                    deploy_events.send(MMapNodeDeploy {
+                    deploy_events.send(DeployMapNode {
                         entity_id,
-                        node_kind: node.kind.clone(),
+                        node: node.clone(),
                     });
                 }
             } else {
                 // Add
                 let entity_id = commands.spawn(node_id.clone()).id();
                 map_context.node_lookup.insert(*node_id, entity_id);
-                deploy_events.send(MMapNodeDeploy {
+                deploy_events.send(DeployMapNode {
                     entity_id,
-                    node_kind: node.kind.clone(),
+                    node: node.clone(),
                 });
                 info!("add {}", entity_id);
             }
@@ -502,9 +503,9 @@ fn reflect_map_changes_in_world(
         for (node_id, node) in new_map.iter() {
             let entity_id = commands.spawn(node_id.clone()).id();
             map_context.node_lookup.insert(*node_id, entity_id);
-            deploy_events.send(MMapNodeDeploy {
+            deploy_events.send(DeployMapNode {
                 entity_id,
-                node_kind: node.kind.clone(),
+                node: node.clone(),
             });
             info!("add (nothing b4) {}", entity_id);
         }
@@ -515,7 +516,7 @@ fn reflect_map_changes_in_world(
 
 fn deploy_nodes(
     map_assets: Res<MapAssets>,
-    mut deploy_events: EventReader<MMapNodeDeploy>,
+    mut deploy_events: EventReader<DeployMapNode>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -525,12 +526,31 @@ fn deploy_nodes(
         entity_commands.despawn_descendants();
         // NOTE: When this is applied, the Children component will be gone, so it's important to
         // despawn descendants BEFORE retaining.
-        entity_commands.retain::<MMapNodeId>();
+        entity_commands.retain::<MapNodeId>();
 
         // Once this match is stupid large it should be split up. Perhaps using observer pattern,
         // fire an event using MapNodeKind generic. Register listeners for each kind.
-        match &event.node_kind {
-            MMapNodeKind::Brush(ref brush) => {
+        match &event.node {
+            MapNode::Light(ref light) => {
+                entity_commands.insert((
+                    Transform::from_translation(light.position),
+                    match light.light_type {
+                        light::LightType::Point => PointLight {
+                            color: light.color,
+                            intensity: light.intensity,
+                            range: light.range,
+                            ..default()
+                        },
+                        light::LightType::Spot => PointLight {
+                            color: light.color,
+                            intensity: light.intensity,
+                            range: light.range,
+                            ..default()
+                        },
+                    },
+                ));
+            }
+            MapNode::Brush(ref brush) => {
                 // Brush will use base entity as a container for sides.
                 let center = brush.bounds.center();
                 let size = brush.bounds.size();
@@ -541,13 +561,6 @@ fn deploy_nodes(
                     RigidBody::Static,
                     Collider::cuboid(size.x, size.y, size.z),
                 ));
-
-                let mut rng = WyRand::from_os_rng();
-                let color = rng.next_u32();
-                let r = (color & 0xFF) as u8;
-                let g = ((color >> 8) & 0xFF) as u8;
-                let b = ((color >> 16) & 0xFF) as u8;
-                let color = Color::srgb_u8(r, g, b);
 
                 for side in brush.bounds.sides_local() {
                     commands
@@ -565,8 +578,8 @@ fn deploy_nodes(
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_event::<MMapMod>()
-        .add_event::<MMapNodeDeploy>()
+    app.add_event::<MapChange>()
+        .add_event::<DeployMapNode>()
         .add_systems(Startup, (init_empty_map, start_loading_map))
         .add_systems(
             PreUpdate,
@@ -574,8 +587,8 @@ pub fn plugin(app: &mut App) {
                 (init_empty_map)
                     .chain()
                     .run_if(input_just_released(KeyCode::KeyR)),
-                map_undo.run_if(input_just_pressed(Binding::Undo)),
-                map_redo.run_if(input_just_pressed(Binding::Redo)),
+                undo_map_change.run_if(input_just_pressed(Binding::Undo)),
+                redo_map_change.run_if(input_just_pressed(Binding::Redo)),
                 save_map.run_if(input_just_pressed(Binding::Save)),
             )
                 .after(InputBindingSystem),
@@ -583,13 +596,13 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                load_map_assets.run_if(resource_added::<MMap>),
+                load_map_assets.run_if(resource_added::<Map>),
                 (update_editor_context, save_map)
                     .chain()
-                    .run_if(resource_exists::<MMap>.and(on_event::<AppExit>)),
-                insert_map_when_loaded.run_if(resource_exists::<LoadingMMap>),
-                map_mod_to_delta.run_if(resource_exists::<MMap>),
-                reflect_map_changes_in_world.run_if(resource_exists_and_changed::<MMap>),
+                    .run_if(resource_exists::<Map>.and(on_event::<AppExit>)),
+                insert_map_when_loaded.run_if(resource_exists::<LoadingMap>),
+                apply_changes_to_map.run_if(resource_exists::<Map>),
+                reflect_map_changes_in_world.run_if(resource_exists_and_changed::<Map>),
                 deploy_nodes
                     .after(reflect_map_changes_in_world)
                     .after(load_map_assets),

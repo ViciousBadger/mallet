@@ -478,7 +478,7 @@ pub fn plugin(app: &mut App) {
         .insert_gizmo_config(
             SelAxisGizmos {},
             GizmoConfig {
-                depth_bias: -0.01,
+                depth_bias: -0.001,
                 ..default()
             },
         )

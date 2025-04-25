@@ -3,7 +3,7 @@ pub mod freelook;
 pub mod selection;
 
 use crate::core::{
-    map::MMap,
+    map::Map,
     view::{Gimbal, GimbalPos},
     AppState,
 };
@@ -13,14 +13,14 @@ use bevy::{
 };
 use freelook::Freelook;
 
-fn init_editor(mut commands: Commands, existing_map: Option<Res<MMap>>) {
+fn init_editor(mut commands: Commands, existing_map: Option<Res<Map>>) {
     let spawn_pos = if let Some(map) = existing_map {
         map.editor_context.camera_pos.clone()
     } else {
         GimbalPos {
             pos: vec3(0.0, 2.0, 0.0),
             rot: Gimbal {
-                pitch_yaw: vec2(0.0, 0.4),
+                pitch_yaw: vec2(15_f32.to_radians(), 0.0),
                 roll: 0.0,
             },
         }
