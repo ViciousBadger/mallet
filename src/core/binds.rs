@@ -168,10 +168,10 @@ impl BoundInput {
         self
     }
 
-    pub fn with_alt(mut self) -> Self {
-        self.alt = true;
-        self
-    }
+    // pub fn with_alt(mut self) -> Self {
+    //     self.alt = true;
+    //     self
+    // }
 }
 
 #[derive(Resource, Deref)]

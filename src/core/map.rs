@@ -83,10 +83,16 @@ pub enum MMapDelta {
     },
 }
 
+/// Things that are part of map but not saved.
 #[derive(Resource)]
 pub struct MMapContext {
     pub save_path: PathBuf, // Could be in EditorContext but shouldnt be saved.. hmm..
     pub node_lookup: BiHashMap<MMapNodeId, Entity>,
+}
+
+#[derive(Resource)]
+pub struct MapAssets {
+    pub default_material: Handle<StandardMaterial>,
 }
 
 /// Relevant editor state stored in the map file.
@@ -250,13 +256,6 @@ impl MMapNodeKind {
 }
 
 impl MMapContext {
-    pub fn new(save_path: PathBuf) -> Self {
-        Self {
-            save_path,
-            node_lookup: default(),
-        }
-    }
-
     pub fn node_to_entity(&self, node_id: &MMapNodeId) -> Option<&Entity> {
         self.node_lookup.get_by_left(node_id)
     }
@@ -296,7 +295,10 @@ fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
             path.display()
         );
         commands.insert_resource(MMap::default());
-        commands.insert_resource(MMapContext::new(path.clone()));
+        commands.insert_resource(MMapContext {
+            save_path: path.clone(),
+            node_lookup: default(),
+        });
     }
 }
 
@@ -317,7 +319,10 @@ fn insert_map_when_loaded(
             Ok(map) => {
                 tp_writer.send(TPCameraTo(map.editor_context.camera_pos));
                 commands.insert_resource(map);
-                commands.insert_resource(MMapContext::new(loading_map.path.clone()));
+                commands.insert_resource(MMapContext {
+                    save_path: loading_map.path.clone(),
+                    node_lookup: default(),
+                });
             }
             Err(err) => {
                 error!("Failed to load map: {}", err);
@@ -357,10 +362,28 @@ fn init_empty_map(
 ) {
     commands.insert_resource(MMap::default());
     if map_context.is_none() {
-        commands.insert_resource(MMapContext::new(
-            [data_path.get(), &default_map_filename()].iter().collect(),
-        ));
+        commands.insert_resource(MMapContext {
+            save_path: [data_path.get(), &default_map_filename()].iter().collect(),
+            node_lookup: default(),
+        });
     }
+}
+
+fn load_map_assets(
+    asset_server: Res<AssetServer>,
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let texture = asset_server.load("concrete.png");
+
+    let material = materials.add(StandardMaterial {
+        base_color_texture: Some(texture),
+        ..default()
+    });
+
+    commands.insert_resource(MapAssets {
+        default_material: material,
+    });
 }
 
 #[derive(Event)]
@@ -491,6 +514,7 @@ fn reflect_map_changes_in_world(
 }
 
 fn deploy_nodes(
+    map_assets: Res<MapAssets>,
     mut deploy_events: EventReader<MMapNodeDeploy>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -530,7 +554,8 @@ fn deploy_nodes(
                         .spawn((
                             Transform::IDENTITY.with_translation(side.pos),
                             Mesh3d(meshes.add(side.plane.mesh())),
-                            MeshMaterial3d(materials.add(color)),
+                            //MeshMaterial3d(materials.add(color)),
+                            MeshMaterial3d(map_assets.default_material.clone()),
                         ))
                         .set_parent(event.entity_id);
                 }
@@ -542,8 +567,7 @@ fn deploy_nodes(
 pub fn plugin(app: &mut App) {
     app.add_event::<MMapMod>()
         .add_event::<MMapNodeDeploy>()
-        .add_systems(Startup, start_loading_map)
-        .add_systems(Startup, init_empty_map)
+        .add_systems(Startup, (init_empty_map, start_loading_map))
         .add_systems(
             PreUpdate,
             (
@@ -559,13 +583,16 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
+                load_map_assets.run_if(resource_added::<MMap>),
                 (update_editor_context, save_map)
                     .chain()
                     .run_if(resource_exists::<MMap>.and(on_event::<AppExit>)),
                 insert_map_when_loaded.run_if(resource_exists::<LoadingMMap>),
                 map_mod_to_delta.run_if(resource_exists::<MMap>),
                 reflect_map_changes_in_world.run_if(resource_exists_and_changed::<MMap>),
-                deploy_nodes.after(reflect_map_changes_in_world),
+                deploy_nodes
+                    .after(reflect_map_changes_in_world)
+                    .after(load_map_assets),
             ),
         );
 }
