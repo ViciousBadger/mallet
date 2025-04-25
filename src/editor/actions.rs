@@ -181,6 +181,17 @@ fn any_action_cleanup(mut next_sel_mode: ResMut<NextState<SelMode>>) {
     // next_sel_mode.set(SelMode::Normal);
 }
 
+fn remove_node(
+    sel_target: Res<SelTarget>,
+    map_context: Res<MMapContext>,
+    mut mod_events: EventWriter<MMapMod>,
+) {
+    if let Some(entity) = sel_target.primary {
+        let node_id = map_context.entity_to_node(&entity).unwrap();
+        mod_events.send(MMapMod::Remove(*node_id));
+    }
+}
+
 pub fn plugin(app: &mut App) {
     app.init_state::<EditorAction>()
         .insert_gizmo_config(
@@ -195,15 +206,20 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             PreUpdate,
             (
-                (start_building_brush_here.run_if(
-                    not(resource_exists::<SelTargetBrushSide>)
-                        .and(input_just_pressed(MouseButton::Left)),
-                ),)
-                    .run_if(in_state(EditorAction::None)),
-                (start_resizing_brush.run_if(
-                    resource_exists::<SelTargetBrushSide>
-                        .and(input_just_pressed(MouseButton::Left)),
-                ),)
+                (
+                    start_building_brush_here.run_if(
+                        not(resource_exists::<SelTargetBrushSide>)
+                            .and(input_just_pressed(MouseButton::Left)),
+                    ),
+                    start_resizing_brush.run_if(
+                        resource_exists::<SelTargetBrushSide>
+                            .and(input_just_pressed(MouseButton::Left)),
+                    ),
+                    remove_node.run_if(
+                        resource_exists::<SelTargetBrushSide>
+                            .and(input_just_pressed(KeyCode::Delete)),
+                    ),
+                )
                     .run_if(in_state(EditorAction::None)),
                 (
                     build_brush_draw_gizmos,

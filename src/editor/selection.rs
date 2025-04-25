@@ -461,7 +461,6 @@ fn sel_brush_test(
             }
         }
     } else if sel_brush_target_side.is_some() {
-        info!("fucking off");
         commands.remove_resource::<SelTargetBrushSide>();
     }
 }
