@@ -11,7 +11,7 @@ use crate::{
     util::{enter_state, grab_mouse, release_mouse},
 };
 
-use super::EditorSystems;
+use super::{selection::SelectedPos, EditorSystems};
 
 #[derive(Component)]
 #[require(Camera3d, Gimbal)]
@@ -78,6 +78,14 @@ fn freelook_movement(mut q_freelook: Query<(&mut Freelook, &mut Transform)>, tim
     }
 }
 
+fn tp_to_selection(sel_pos: Res<SelectedPos>, mut q_camera: Query<&mut Transform, With<Camera>>) {
+    let mut cam_trans = q_camera.single_mut();
+
+    let dist = cam_trans.translation.distance(**sel_pos);
+    let moved = cam_trans.translation.move_towards(**sel_pos, dist - 5.0);
+    cam_trans.translation = moved;
+}
+
 pub fn plugin(app: &mut App) {
     app.init_state::<FreelookState>()
         .add_systems(
@@ -88,6 +96,9 @@ pub fn plugin(app: &mut App) {
                 modify_freelook_speed(-1).run_if(input_just_pressed(Binding::FlySpeedDown)),
                 enter_state(FreelookState::Locked).run_if(input_just_pressed(Binding::FlyMode)),
                 enter_state(FreelookState::Unlocked).run_if(input_just_released(Binding::FlyMode)),
+                tp_to_selection.run_if(
+                    input_just_pressed(Binding::Teleport).and(resource_exists::<SelectedPos>),
+                ),
             )
                 .after(InputBindingSystem)
                 .in_set(EditorSystems),

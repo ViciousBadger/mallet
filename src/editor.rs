@@ -52,6 +52,10 @@ pub fn plugin(app: &mut App) {
             EditorSystems.run_if(in_state(AppState::InEditor)),
         )
         .configure_sets(Update, EditorSystems.run_if(in_state(AppState::InEditor)))
+        .configure_sets(
+            PostUpdate,
+            EditorSystems.run_if(in_state(AppState::InEditor)),
+        )
         .add_systems(OnEnter(AppState::InEditor), init_editor)
         .add_systems(OnExit(AppState::InEditor), teardown_editor);
 }

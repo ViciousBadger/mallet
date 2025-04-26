@@ -1,7 +1,9 @@
 use avian3d::prelude::{AnyCollider, Collider};
 use bevy::{color::palettes::css, prelude::*};
 
-use super::{SelectionTargets, SpatialAxis, SpatialCursor, SpatialCursorMode, SEL_DIST_LIMIT};
+use super::{
+    SelectedPos, SelectionTargets, SpatialAxis, SpatialCursor, SpatialCursorMode, SEL_DIST_LIMIT,
+};
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct SelGridGizmos {}
@@ -29,18 +31,19 @@ pub fn draw_sel_grid_gizmos(sel: Res<SpatialCursor>, mut gizmos: Gizmos<SelGridG
 }
 
 pub fn draw_axis_line_gizmos(
-    sel: Res<SpatialCursor>,
+    cursor: Res<SpatialCursor>,
+    sel_pos: Res<SelectedPos>,
     sel_mode: Res<State<SpatialCursorMode>>,
     mut axis_gizmos: Gizmos<SelAxisGizmos>,
 ) {
     let sel_color = css::GOLD;
-    let min = sel.min_pos();
-    let max = sel.max_pos();
+    let min = cursor.min_pos();
+    let max = cursor.max_pos();
 
     // X axis
     axis_gizmos.line(
-        Vec3::new(min.x, sel.position.y, sel.position.z),
-        Vec3::new(max.x, sel.position.y, sel.position.z),
+        Vec3::new(min.x, sel_pos.y, sel_pos.z),
+        Vec3::new(max.x, sel_pos.y, sel_pos.z),
         if *sel_mode == SpatialCursorMode::AxisLocked(SpatialAxis::X) {
             sel_color
         } else {
@@ -50,8 +53,8 @@ pub fn draw_axis_line_gizmos(
 
     // Y axis
     axis_gizmos.line(
-        Vec3::new(sel.position.x, min.y, sel.position.z),
-        Vec3::new(sel.position.x, max.y, sel.position.z),
+        Vec3::new(sel_pos.x, min.y, sel_pos.z),
+        Vec3::new(sel_pos.x, max.y, sel_pos.z),
         if *sel_mode == SpatialCursorMode::AxisLocked(SpatialAxis::Y) {
             sel_color
         } else {
@@ -61,8 +64,8 @@ pub fn draw_axis_line_gizmos(
 
     // Z axis
     axis_gizmos.line(
-        Vec3::new(sel.position.x, sel.position.y, min.z),
-        Vec3::new(sel.position.x, sel.position.y, max.z),
+        Vec3::new(sel_pos.x, sel_pos.y, min.z),
+        Vec3::new(sel_pos.x, sel_pos.y, max.z),
         if *sel_mode == SpatialCursorMode::AxisLocked(SpatialAxis::Z) {
             sel_color
         } else {

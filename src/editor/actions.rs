@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{
-    selection::{SelTargetBrushSide, SelectionTargets},
+    selection::{SelTargetBrushSide, SelectedPos, SelectionTargets},
     EditorSystems,
 };
 
@@ -51,24 +51,22 @@ fn cancel_action(mut next_editor_action: ResMut<NextState<EditorAction>>) {
 // Action: Building a new brush
 
 fn start_building_brush_here(
-    sel: Res<SpatialCursor>,
+    sel_pos: Res<SelectedPos>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
     mut commands: Commands,
 ) {
     next_editor_action.set(EditorAction::BuildBrush);
-    commands.insert_resource(BuildBrushProcess {
-        start: sel.position,
-    });
+    commands.insert_resource(BuildBrushProcess { start: **sel_pos });
 }
 
 fn end_building_brush_here(
     process: Res<BuildBrushProcess>,
-    sel: Res<SpatialCursor>,
+    sel_pos: Res<SelectedPos>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
     mut map_changes: EventWriter<MapChange>,
 ) {
     let start = process.start;
-    let end = sel.position;
+    let end = **sel_pos;
     let bounds = BrushBounds::new(start, end);
 
     if bounds.is_valid() {
@@ -79,11 +77,11 @@ fn end_building_brush_here(
 
 fn build_brush_draw_gizmos(
     process: Res<BuildBrushProcess>,
-    sel: Res<SpatialCursor>,
+    sel_pos: Res<SelectedPos>,
     mut gizmos: Gizmos<ActionGizmos>,
 ) {
     let start = process.start;
-    let end = sel.position;
+    let end = **sel_pos;
     let bounds = BrushBounds::new(start, end);
 
     let transform = Transform::IDENTITY
@@ -120,14 +118,14 @@ fn start_resizing_brush(
 }
 
 fn live_brush_resize(
-    sel: Res<SpatialCursor>,
+    sel_pos: Res<SelectedPos>,
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
     mut deploy_events: EventWriter<DeployMapNode>,
 ) {
     let brush = q_brushes.get(process.brush.entity).unwrap();
     let resized_brush = Brush {
-        bounds: brush.bounds.resized(process.side, sel.position),
+        bounds: brush.bounds.resized(process.side, **sel_pos),
     };
     deploy_events.send(DeployMapNode {
         target_entity: process.brush.entity,
@@ -136,7 +134,7 @@ fn live_brush_resize(
 }
 
 fn end_resizing_brush_here(
-    sel: Res<SpatialCursor>,
+    sel_pos: Res<SelectedPos>,
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
     map: Res<Map>,
@@ -144,7 +142,7 @@ fn end_resizing_brush_here(
     mut next_editor_action: ResMut<NextState<EditorAction>>,
 ) {
     let brush = q_brushes.get(process.brush.entity).unwrap();
-    let resized_bounds = brush.bounds.resized(process.side, sel.position);
+    let resized_bounds = brush.bounds.resized(process.side, **sel_pos);
     let MapNode::Brush(mut brush) = map.get_node(&process.brush.node_id).unwrap().clone() else {
         panic!("notabrush")
     };
@@ -168,9 +166,9 @@ fn remove_node(sel_target: Res<SelectionTargets>, mut mod_events: EventWriter<Ma
     mod_events.send(MapChange::Remove(sel_target.focused.node_id));
 }
 
-fn add_light(sel: Res<SpatialCursor>, mut mod_events: EventWriter<MapChange>) {
+fn add_light(sel_pos: Res<SelectedPos>, mut mod_events: EventWriter<MapChange>) {
     let light = Light {
-        position: sel.position,
+        position: **sel_pos,
         light_type: LightType::Point,
         color: Color::Srgba(css::WHITE),
         intensity: 30000.0,
@@ -195,7 +193,8 @@ pub fn plugin(app: &mut App) {
             (
                 (
                     start_building_brush_here.run_if(
-                        not(resource_exists::<SelTargetBrushSide>)
+                        resource_exists::<SelectedPos>
+                            .and(not(resource_exists::<SelTargetBrushSide>))
                             .and(input_just_pressed(MouseButton::Left)),
                     ),
                     start_resizing_brush.run_if(
@@ -207,17 +206,23 @@ pub fn plugin(app: &mut App) {
                         input_just_pressed(KeyCode::Delete)
                             .and(resource_exists::<SelectionTargets>),
                     ),
-                    add_light.run_if(input_just_pressed(KeyCode::KeyI)),
+                    add_light.run_if(
+                        resource_exists::<SelectedPos>.and(input_just_pressed(KeyCode::KeyI)),
+                    ),
                 )
                     .run_if(in_state(EditorAction::None)),
                 (
-                    build_brush_draw_gizmos,
-                    end_building_brush_here.run_if(input_just_pressed(MouseButton::Left)),
+                    build_brush_draw_gizmos.run_if(resource_exists::<SelectedPos>),
+                    end_building_brush_here.run_if(
+                        resource_exists::<SelectedPos>.and(input_just_pressed(MouseButton::Left)),
+                    ),
                 )
                     .run_if(in_state(EditorAction::BuildBrush)),
                 (
-                    live_brush_resize,
-                    end_resizing_brush_here.run_if(input_just_released(MouseButton::Left)),
+                    live_brush_resize.run_if(resource_exists::<SelectedPos>),
+                    end_resizing_brush_here.run_if(
+                        resource_exists::<SelectedPos>.and(input_just_released(MouseButton::Left)),
+                    ),
                 )
                     .run_if(in_state(EditorAction::ResizeBrush)),
                 cancel_action.run_if(

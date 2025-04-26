@@ -29,6 +29,7 @@ pub enum Binding {
     FlyMode,
     FlySpeedUp,
     FlySpeedDown,
+    Teleport,
 
     // Selection
     SetSelAxisX,
@@ -203,6 +204,7 @@ impl Default for InputBindingMap {
         map.insert(Binding::FlyMode, BoundInput::mouse(MouseButton::Right));
         map.insert(Binding::FlySpeedUp, BoundInput::scroll_up());
         map.insert(Binding::FlySpeedDown, BoundInput::scroll_down());
+        map.insert(Binding::Teleport, BoundInput::key(KeyCode::KeyF));
         map.insert(Binding::SetSelAxisX, BoundInput::key(KeyCode::KeyX));
         map.insert(Binding::SetSelAxisY, BoundInput::key(KeyCode::KeyC));
         map.insert(Binding::SetSelAxisZ, BoundInput::key(KeyCode::KeyZ));

@@ -1,6 +1,6 @@
 mod visuals;
 
-use avian3d::prelude::{AnyCollider, Collider, SpatialQuery, SpatialQueryFilter};
+use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
 use bevy::{
     color::palettes::css,
     input::{
@@ -8,6 +8,7 @@ use bevy::{
         mouse::MouseMotion,
     },
     prelude::*,
+    text::cosmic_text::Editor,
     window::PrimaryWindow,
 };
 use itertools::Itertools;
@@ -53,11 +54,10 @@ impl SpatialAxis {
 
 #[derive(Resource, Default)]
 pub struct SpatialCursor {
-    pub origin: Vec3,
-    pub position: Vec3,
     pub axis: SpatialAxis,
     pub axis_offset: f32,
     pub snap: bool,
+    pub origin: Vec3,
 }
 
 impl SpatialCursor {
@@ -82,14 +82,35 @@ impl SpatialCursor {
         self.origin + Vec3::ONE * SEL_DIST_LIMIT
     }
 
-    pub fn clamp_vec(&self, vec: Vec3) -> Vec3 {
-        vec.clamp(self.min_pos(), self.max_pos())
+    /// Returns the point snapped to the cursor's snapping grid.
+    pub fn snapped(&self, point: Vec3) -> Vec3 {
+        if self.snap {
+            Vec3::round(point)
+        } else {
+            point
+        }
+    }
+
+    /// Returns the point if within cursor bounds, None if outside.
+    pub fn bounds_checked(&self, point: Vec3) -> Option<Vec3> {
+        (point.cmpgt(self.min_pos()) == BVec3::TRUE && point.cmplt(self.max_pos()) == BVec3::TRUE)
+            .then_some(point)
     }
 }
 
 /// Exists when a position is selected via the spatial cursor.
 #[derive(Resource, Deref, Clone, Copy)]
 pub struct SelectedPos(pub Vec3);
+
+pub trait SelectedPosGet {
+    fn or_default(&self) -> Vec3;
+}
+
+impl SelectedPosGet for Option<Res<'_, SelectedPos>> {
+    fn or_default(&self) -> Vec3 {
+        self.as_ref().map(|res| res.0).unwrap_or(Vec3::ZERO)
+    }
+}
 
 /// Exists when one or more map nodes are intersecting the selected position.
 #[derive(Resource)]
@@ -153,14 +174,17 @@ impl LockedAxis {
     }
 }
 
-fn switch_sel_axis(new_axis: SpatialAxis) -> impl Fn(ResMut<SpatialCursor>) {
-    move |mut sel| {
-        sel.axis_offset = match new_axis {
-            SpatialAxis::X => sel.position.x,
-            SpatialAxis::Y => sel.position.y,
-            SpatialAxis::Z => sel.position.z,
+fn switch_sel_axis(
+    new_axis: SpatialAxis,
+) -> impl Fn(ResMut<SpatialCursor>, Option<Res<SelectedPos>>) {
+    move |mut cursor, sel_pos| {
+        let sel_pos = sel_pos.or_default();
+        cursor.axis_offset = match new_axis {
+            SpatialAxis::X => sel_pos.x,
+            SpatialAxis::Y => sel_pos.y,
+            SpatialAxis::Z => sel_pos.z,
         };
-        sel.axis = new_axis.clone();
+        cursor.axis = new_axis.clone();
     }
 }
 
@@ -222,92 +246,95 @@ fn move_grid_origin_to_camera(
 fn select_normal(
     q_window: Query<&Window, With<PrimaryWindow>>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
-    mut sel: ResMut<SpatialCursor>,
+    cursor: Res<SpatialCursor>,
     mut sel_changed: EventWriter<SelectionChanged>,
+    mut commands: Commands,
 ) {
     let window = q_window.single();
 
-    if let Some(mouse_pos) = window.cursor_position() {
-        if let Ok((cam, cam_trans)) = q_camera.get_single() {
-            if let Ok(ray) = cam.viewport_to_world(cam_trans, mouse_pos) {
-                let plane = sel.axis.as_plane();
+    let setpos = || {
+        let mouse_pos = window.cursor_position()?;
+        let (cam, cam_trans) = q_camera.get_single().ok()?;
+        let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
+        let plane = cursor.axis.as_plane();
+        let dist = ray.intersect_plane(cursor.grid_center(), plane)?;
+        cursor.bounds_checked(cursor.snapped(ray.get_point(dist)))
+    };
 
-                if let Some(dist) = ray.intersect_plane(sel.grid_center(), plane) {
-                    let point = ray.get_point(dist);
-                    let point = if sel.snap { Vec3::round(point) } else { point };
-                    let point = point.clamp(sel.min_pos(), sel.max_pos());
-                    sel.position = point;
-                    sel_changed.send(SelectionChanged);
-                }
-            }
-        }
+    if let Some(pos) = setpos() {
+        commands.insert_resource(SelectedPos(pos));
+    } else {
+        commands.remove_resource::<SelectedPos>();
     }
+    sel_changed.send(SelectionChanged);
 }
 
 fn select_locked(
     q_window: Query<&Window, With<PrimaryWindow>>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
     locked_axis: Res<State<LockedAxis>>,
-    mut sel: ResMut<SpatialCursor>,
+    selected_pos: Option<Res<SelectedPos>>,
+    mut cursor: ResMut<SpatialCursor>,
     mut sel_changed: EventWriter<SelectionChanged>,
+    mut commands: Commands,
 ) {
-    let window = q_window.single();
-
     let axis = locked_axis.get_axis();
+    let lockpos = selected_pos.or_default();
 
-    if let Some(mouse_pos) = window.cursor_position() {
-        let (cam, cam_trans) = q_camera.single();
+    let setpos = || {
+        let window = q_window.get_single().ok()?;
+        let mouse_pos = window.cursor_position()?;
+        let (cam, cam_trans) = q_camera.get_single().ok()?;
+        let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
+        let mut towards_cam = lockpos - cam_trans.translation();
+        match axis {
+            SpatialAxis::X => towards_cam.x = 0.0,
+            SpatialAxis::Y => towards_cam.y = 0.0,
+            SpatialAxis::Z => towards_cam.z = 0.0,
+        }
+        towards_cam = towards_cam.normalize();
+        let plane = InfinitePlane3d::new(towards_cam);
 
-        if let Ok(ray) = cam.viewport_to_world(cam_trans, mouse_pos) {
-            let mut towards_cam = sel.position - cam_trans.translation();
-            match axis {
-                SpatialAxis::X => towards_cam.x = 0.0,
-                SpatialAxis::Y => towards_cam.y = 0.0,
-                SpatialAxis::Z => towards_cam.z = 0.0,
+        let dist = ray.intersect_plane(lockpos, plane)?;
+        cursor.bounds_checked(cursor.snapped(ray.get_point(dist)))
+    };
+
+    if let Some(pos) = setpos() {
+        match axis {
+            SpatialAxis::X => {
+                if axis == &cursor.axis {
+                    cursor.axis_offset = pos.x
+                };
+                commands.insert_resource(SelectedPos(lockpos.with_x(pos.x)));
             }
-            towards_cam = towards_cam.normalize();
-            let plane = InfinitePlane3d::new(towards_cam);
-
-            if let Some(dist) = ray.intersect_plane(sel.position, plane) {
-                let point = ray.get_point(dist);
-                let point = if sel.snap { Vec3::round(point) } else { point };
-                let point = sel.clamp_vec(point);
-
-                match axis {
-                    SpatialAxis::X => {
-                        if axis == &sel.axis {
-                            sel.axis_offset = point.x
-                        };
-                        sel.position.x = point.x;
-                    }
-                    SpatialAxis::Y => {
-                        if axis == &sel.axis {
-                            sel.axis_offset = point.y;
-                        };
-                        sel.position.y = point.y;
-                    }
-                    SpatialAxis::Z => {
-                        if axis == &sel.axis {
-                            sel.axis_offset = point.z;
-                        };
-                        sel.position.z = point.z;
-                    }
-                }
-                sel_changed.send(SelectionChanged);
+            SpatialAxis::Y => {
+                if axis == &cursor.axis {
+                    cursor.axis_offset = pos.y;
+                };
+                commands.insert_resource(SelectedPos(lockpos.with_y(pos.y)));
+            }
+            SpatialAxis::Z => {
+                if axis == &cursor.axis {
+                    cursor.axis_offset = pos.z;
+                };
+                commands.insert_resource(SelectedPos(lockpos.with_z(pos.z)));
             }
         }
+    } else {
+        commands.remove_resource::<SelectedPos>();
     }
+    sel_changed.send(SelectionChanged);
 }
 
-fn find_targets_in_selection(
-    sel: Res<SpatialCursor>,
+fn find_targets_at_selection(
+    sel_pos: Res<SelectedPos>,
     spatial_query: SpatialQuery,
     q_map_nodes: Query<&MapNodeId>,
     sel_targets: Option<ResMut<SelectionTargets>>,
     mut commands: Commands,
 ) {
     let intersecting_nodes = spatial_query
-        .point_intersections(sel.position, &SpatialQueryFilter::default())
+        .point_intersections(**sel_pos, &SpatialQueryFilter::default())
         .iter()
         .filter_map(|entity_id| {
             q_map_nodes
@@ -359,14 +386,18 @@ fn scroll_intersecting(num: i32) -> impl Fn(ResMut<SelectionTargets>) {
 }
 
 fn reset_axis_offset(
-    mut sel: ResMut<SpatialCursor>,
+    sel_pos: Option<Res<SelectedPos>>,
+    mut cursor: ResMut<SpatialCursor>,
     mut sel_changed: EventWriter<SelectionChanged>,
+    mut commands: Commands,
 ) {
-    sel.axis_offset = 0.0;
-    match sel.axis {
-        SpatialAxis::X => sel.position.x = 0.0,
-        SpatialAxis::Y => sel.position.y = 0.0,
-        SpatialAxis::Z => sel.position.z = 0.0,
+    let selpos = sel_pos.or_default();
+
+    cursor.axis_offset = 0.0;
+    match cursor.axis {
+        SpatialAxis::X => commands.insert_resource(SelectedPos(selpos.with_x(0.0))),
+        SpatialAxis::Y => commands.insert_resource(SelectedPos(selpos.with_y(0.0))),
+        SpatialAxis::Z => commands.insert_resource(SelectedPos(selpos.with_z(0.0))),
     };
     sel_changed.send(SelectionChanged);
 }
@@ -375,7 +406,7 @@ fn reset_axis_offset(
 pub struct SelTargetBrushSide(pub Facing3d);
 
 fn sel_brush_test(
-    sel: Res<SpatialCursor>,
+    sel_pos: Res<SelectedPos>,
     sel_targets: Option<Res<SelectionTargets>>,
     sel_brush_target_side: Option<Res<SelTargetBrushSide>>,
     brushes: Query<&Brush>,
@@ -388,9 +419,9 @@ fn sel_brush_test(
                 .bounds
                 .sides_world()
                 .sorted_by(|side_a, side_b| {
-                    sel.position
+                    sel_pos
                         .distance(side_a.pos)
-                        .total_cmp(&sel.position.distance(side_b.pos))
+                        .total_cmp(&sel_pos.distance(side_b.pos))
                 })
                 .next()
                 .unwrap();
@@ -503,15 +534,21 @@ pub fn plugin(app: &mut App) {
                     select_locked.run_if(in_state(SelIsAxisLocked).and(on_event::<MouseMotion>)),
                 )
                     .run_if(in_state(FreelookState::Unlocked)),
-                find_targets_in_selection.run_if(on_event::<SelectionChanged>),
-                (
-                    draw_sel_grid_gizmos,
-                    draw_axis_line_gizmos,
-                    draw_sel_target_gizmos.run_if(resource_exists::<SelectionTargets>),
-                    sel_brush_test,
-                ),
+                find_targets_at_selection
+                    .run_if(resource_exists::<SelectedPos>.and(on_event::<SelectionChanged>)),
+                sel_brush_test.run_if(resource_exists::<SelectedPos>),
             )
                 .chain()
+                .in_set(EditorSystems),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                draw_sel_grid_gizmos,
+                draw_axis_line_gizmos.run_if(resource_exists::<SelectedPos>),
+                draw_sel_target_gizmos.run_if(resource_exists::<SelectionTargets>),
+            )
+                .after(TransformSystem::TransformPropagate)
                 .in_set(EditorSystems),
         );
 }
