@@ -29,7 +29,7 @@ pub struct Map {
     pub editor_context: EditorContext,
 }
 
-/// Special persistent identifier for map nodes.
+/// Persistent identifier for map nodes.
 #[derive(
     Deref,
     Debug,
@@ -52,6 +52,13 @@ impl std::fmt::Display for MapNodeId {
     }
 }
 
+/// Combines node id with its instantiated entity
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveMapNodeId {
+    pub node_id: MapNodeId,
+    pub entity: Entity,
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
 pub enum MapNode {
     Brush(Brush),
@@ -70,7 +77,7 @@ pub enum MapChange {
 /// MapNode can be different from the one stored in the Map, to make temporary node changes in the editor.
 #[derive(Event)]
 pub struct DeployMapNode {
-    pub entity_id: Entity,
+    pub target_entity: Entity,
     pub node: MapNode,
 }
 
@@ -464,7 +471,7 @@ fn reflect_map_changes_in_world(
                         .node_to_entity(node_id)
                         .expect("Modified node should already be instantiated in world");
                     deploy_events.send(DeployMapNode {
-                        entity_id,
+                        target_entity: entity_id,
                         node: node.clone(),
                     });
                 }
@@ -473,7 +480,7 @@ fn reflect_map_changes_in_world(
                 let entity_id = commands.spawn(*node_id).id();
                 map_context.node_lookup.insert(*node_id, entity_id);
                 deploy_events.send(DeployMapNode {
-                    entity_id,
+                    target_entity: entity_id,
                     node: node.clone(),
                 });
                 info!("add {}", entity_id);
@@ -498,7 +505,7 @@ fn reflect_map_changes_in_world(
             let entity_id = commands.spawn(*node_id).id();
             map_context.node_lookup.insert(*node_id, entity_id);
             deploy_events.send(DeployMapNode {
-                entity_id,
+                target_entity: entity_id,
                 node: node.clone(),
             });
             info!("add (nothing b4) {}", entity_id);
@@ -515,7 +522,7 @@ fn deploy_nodes(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     for event in deploy_events.read() {
-        let mut entity_commands = commands.entity(event.entity_id);
+        let mut entity_commands = commands.entity(event.target_entity);
         entity_commands.despawn_descendants();
         // NOTE: When this is applied, the Children component will be gone, so it's important to
         // despawn descendants BEFORE retaining.
@@ -563,7 +570,7 @@ fn deploy_nodes(
                             //MeshMaterial3d(materials.add(color)),
                             MeshMaterial3d(map_assets.default_material.clone()),
                         ))
-                        .set_parent(event.entity_id);
+                        .set_parent(event.target_entity);
                 }
             }
         }
