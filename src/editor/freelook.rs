@@ -79,6 +79,7 @@ fn freelook_movement(mut q_freelook: Query<(&mut Freelook, &mut Transform)>, tim
 }
 
 fn tp_to_selection(sel_pos: Res<SelectedPos>, mut q_camera: Query<&mut Transform, With<Camera>>) {
+    //TODO: use "view"'s tp event
     let mut cam_trans = q_camera.single_mut();
 
     let dist = cam_trans.translation.distance(**sel_pos);

@@ -1,10 +1,10 @@
 pub mod brush;
 pub mod light;
 
-use crate::{app_data::AppDataPath, core::binds::InputBindingSystem, util::IdGen};
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
     input::common_conditions::{input_just_pressed, input_just_released},
+    math::{vec2, vec3},
     prelude::*,
     tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
 };
@@ -16,6 +16,11 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs::File, path::PathBuf};
 use ulid::{serde::ulid_as_u128, Ulid};
 
+use crate::{
+    app_data::AppDataPath, core::binds::InputBindingSystem, editor::selection::SpatialCursor,
+    util::IdGen,
+};
+
 use super::{
     binds::Binding,
     view::{Gimbal, GimbalPos, TPCameraTo},
@@ -26,7 +31,48 @@ pub struct Map {
     state: BTreeMap<MapNodeId, MapNode>,
     cur_delta_idx: NodeIndex<u32>,
     delta_graph: Dag<MapDelta, ()>,
-    pub editor_context: EditorContext,
+}
+
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct MapLookup(BiHashMap<MapNodeId, Entity>);
+
+#[derive(Resource)]
+pub struct MapSession {
+    pub save_path: PathBuf,
+}
+
+#[derive(Resource)]
+pub struct MapAssets {
+    pub default_material: Handle<StandardMaterial>,
+}
+
+/// Persistent editor state.
+/// Used when jumping back to editor after playtesting and when saving/loading map files.
+#[derive(Resource, Serialize, Deserialize, Clone)]
+pub struct EditorContext {
+    pub camera_pos: GimbalPos,
+    pub cursor: SpatialCursor,
+}
+
+impl Default for EditorContext {
+    fn default() -> Self {
+        Self {
+            camera_pos: GimbalPos {
+                pos: vec3(0.0, 2.0, 0.0),
+                rot: Gimbal {
+                    pitch_yaw: vec2(15_f32.to_radians(), 0.0),
+                    roll: 0.0,
+                },
+            },
+            cursor: default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MapFile {
+    map: Map,
+    editor: EditorContext,
 }
 
 /// Persistent identifier for map nodes.
@@ -100,24 +146,6 @@ pub enum MapDelta {
     },
 }
 
-/// Things that are part of map but not saved.
-#[derive(Resource)]
-pub struct MapContext {
-    pub save_path: PathBuf, // Could be in EditorContext but shouldnt be saved.. hmm..
-    pub node_lookup: BiHashMap<MapNodeId, Entity>,
-}
-
-#[derive(Resource)]
-pub struct MapAssets {
-    pub default_material: Handle<StandardMaterial>,
-}
-
-/// Relevant editor state stored in the map file.
-#[derive(Serialize, Deserialize, Default, Clone)]
-pub struct EditorContext {
-    pub camera_pos: GimbalPos,
-}
-
 #[derive(Debug)]
 enum MapDeltaApplyError {
     NodeExists,
@@ -132,7 +160,6 @@ impl Default for Map {
             state: BTreeMap::new(),
             cur_delta_idx: root_node,
             delta_graph: graph,
-            editor_context: EditorContext::default(),
         }
     }
 }
@@ -165,6 +192,9 @@ impl Map {
             .add_child(self.cur_delta_idx, (), new_delta);
         self.cur_delta_idx = new_node;
     }
+
+    // NOTE: can_undo and undo are seperate functions so that you can check if an action is
+    // possible without &mut access to the resource (to avoid triggering change detection).
 
     pub fn can_undo(&self) -> bool {
         self.delta_graph
@@ -242,6 +272,17 @@ impl Map {
         }
     }
 }
+
+impl MapLookup {
+    pub fn node_to_entity(&self, node_id: &MapNodeId) -> Option<&Entity> {
+        self.0.get_by_left(node_id)
+    }
+
+    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&MapNodeId> {
+        self.0.get_by_right(entity_id)
+    }
+}
+
 impl MapDelta {
     pub fn reverse_of(&self) -> MapDelta {
         match self {
@@ -272,23 +313,13 @@ impl MapNode {
     }
 }
 
-impl MapContext {
-    pub fn node_to_entity(&self, node_id: &MapNodeId) -> Option<&Entity> {
-        self.node_lookup.get_by_left(node_id)
-    }
-
-    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&MapNodeId> {
-        self.node_lookup.get_by_right(entity_id)
-    }
-}
-
 #[derive(Resource)]
 struct LoadingMap {
     path: PathBuf,
     task: Task<MapLoadResult>,
 }
 
-pub type MapLoadResult = Result<Map, postcard::Error>;
+pub type MapLoadResult = Result<MapFile, postcard::Error>;
 
 pub const MAP_FILE_EXT: &str = "mmap";
 pub const DEFAULT_MAP_NAME: &str = "map";
@@ -312,16 +343,15 @@ fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
             path.display()
         );
         commands.insert_resource(Map::default());
-        commands.insert_resource(MapContext {
+        commands.insert_resource(MapSession {
             save_path: path.clone(),
-            node_lookup: default(),
         });
     }
 }
 
 async fn load_map_async(path: PathBuf) -> MapLoadResult {
     let bytes = std::fs::read(path).unwrap();
-    postcard::from_bytes::<Map>(&bytes)
+    postcard::from_bytes::<MapFile>(&bytes)
 }
 
 fn insert_map_when_loaded(
@@ -333,13 +363,13 @@ fn insert_map_when_loaded(
         commands.remove_resource::<LoadingMap>();
 
         match map_result {
-            Ok(map) => {
-                tp_writer.send(TPCameraTo(map.editor_context.camera_pos));
-                commands.insert_resource(map);
-                commands.insert_resource(MapContext {
+            Ok(map_file) => {
+                tp_writer.send(TPCameraTo(map_file.editor.camera_pos));
+                commands.insert_resource(MapSession {
                     save_path: loading_map.path.clone(),
-                    node_lookup: default(),
                 });
+                commands.insert_resource(map_file.map);
+                commands.insert_resource(map_file.editor);
             }
             Err(err) => {
                 error!("Failed to load map: {}", err);
@@ -348,19 +378,29 @@ fn insert_map_when_loaded(
     }
 }
 
-fn update_editor_context(mut map: ResMut<Map>, q_camera: Query<(&GlobalTransform, &Gimbal)>) {
+pub fn update_editor_context(
+    cursor: Res<SpatialCursor>,
+    q_camera: Query<(&GlobalTransform, &Gimbal)>,
+    mut commands: Commands,
+) {
     let (cam_t, cam_g) = q_camera.single();
     let new_context = EditorContext {
+        cursor: cursor.clone(),
         camera_pos: GimbalPos::new(cam_t.translation(), *cam_g),
     };
-    map.editor_context = new_context;
+    commands.insert_resource(new_context);
 }
 
-fn save_map(map: Res<Map>, map_context: Res<MapContext>) {
+fn save_map(map_session: Res<MapSession>, map: Res<Map>, editor_context: Res<EditorContext>) {
     // TODO: async, of course this would mean it can't run on AppExit.
 
-    let file = File::create(&map_context.save_path).unwrap();
-    postcard::to_io(map.into_inner(), file).unwrap();
+    let map_file = MapFile {
+        map: map.clone(),
+        editor: editor_context.clone(),
+    };
+
+    let file = File::create(&map_session.save_path).unwrap();
+    postcard::to_io(&map_file, file).unwrap();
 }
 
 fn unload_map(q_live_nodes: Query<Entity, With<MapNodeId>>, mut commands: Commands) {
@@ -373,14 +413,14 @@ fn unload_map(q_live_nodes: Query<Entity, With<MapNodeId>>, mut commands: Comman
 
 fn init_empty_map(
     data_path: Res<AppDataPath>,
-    map_context: Option<Res<MapContext>>,
+    map_session: Option<Res<MapSession>>,
     mut commands: Commands,
 ) {
     commands.insert_resource(Map::default());
-    if map_context.is_none() {
-        commands.insert_resource(MapContext {
+    // TODO:Should probably also reset session, equivalent of "new file" in most editors
+    if map_session.is_none() {
+        commands.insert_resource(MapSession {
             save_path: [data_path.get(), &default_map_filename()].iter().collect(),
-            node_lookup: default(),
         });
     }
 }
@@ -455,7 +495,7 @@ pub fn redo_map_change(mut map: ResMut<Map>) {
 fn reflect_map_changes_in_world(
     new_map: Res<Map>,
     mut last_map: Local<Option<Map>>,
-    mut map_context: ResMut<MapContext>,
+    mut map_lookup: ResMut<MapLookup>,
     mut deploy_events: EventWriter<DeployMapNode>,
     mut commands: Commands,
 ) {
@@ -467,7 +507,7 @@ fn reflect_map_changes_in_world(
                 if node != last_node {
                     // Modify
                     info!("mod {}", node_id);
-                    let entity_id = *map_context
+                    let entity_id = *map_lookup
                         .node_to_entity(node_id)
                         .expect("Modified node should already be instantiated in world");
                     deploy_events.send(DeployMapNode {
@@ -478,7 +518,7 @@ fn reflect_map_changes_in_world(
             } else {
                 // Add
                 let entity_id = commands.spawn(*node_id).id();
-                map_context.node_lookup.insert(*node_id, entity_id);
+                map_lookup.insert(*node_id, entity_id);
                 deploy_events.send(DeployMapNode {
                     target_entity: entity_id,
                     node: node.clone(),
@@ -490,20 +530,20 @@ fn reflect_map_changes_in_world(
         let removed_node_entities: Vec<Entity> = last_map
             .node_ids()
             .filter(|id| !new_map.has_node(id))
-            .filter_map(|id| map_context.node_to_entity(id))
+            .filter_map(|id| map_lookup.node_to_entity(id))
             .cloned()
             .collect();
 
         for entity in removed_node_entities {
             info!("fuck off {}", entity);
             commands.entity(entity).despawn_recursive();
-            map_context.node_lookup.remove_by_right(&entity);
+            map_lookup.remove_by_right(&entity);
         }
     } else {
         // Nothing to compare with, add all.
         for (node_id, node) in new_map.iter() {
             let entity_id = commands.spawn(*node_id).id();
-            map_context.node_lookup.insert(*node_id, entity_id);
+            map_lookup.insert(*node_id, entity_id);
             deploy_events.send(DeployMapNode {
                 target_entity: entity_id,
                 node: node.clone(),
@@ -580,6 +620,8 @@ fn deploy_nodes(
 pub fn plugin(app: &mut App) {
     app.add_event::<MapChange>()
         .add_event::<DeployMapNode>()
+        .init_resource::<MapLookup>()
+        .init_resource::<EditorContext>()
         .add_systems(Startup, (init_empty_map, start_loading_map))
         .add_systems(
             PreUpdate,

@@ -8,13 +8,13 @@ use bevy::{
         mouse::MouseMotion,
     },
     prelude::*,
-    text::cosmic_text::Editor,
     window::PrimaryWindow,
 };
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use visuals::{
-    draw_axis_line_gizmos, draw_sel_grid_gizmos, draw_sel_target_gizmos, SelAxisGizmos,
-    SelGridGizmos, SelHighlightGizmos, SelTargetGizmos,
+    draw_axis_line_gizmos, draw_sel_grid_gizmos, draw_sel_target_gizmos, install_gizmos,
+    SelHighlightGizmos,
 };
 
 use crate::{
@@ -30,7 +30,7 @@ use super::EditorSystems;
 
 const SEL_DIST_LIMIT: f32 = 64.0;
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SpatialAxis {
     X,
     #[default]
@@ -52,7 +52,7 @@ impl SpatialAxis {
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Serialize, Deserialize, Clone, Resource, Default)]
 pub struct SpatialCursor {
     pub axis: SpatialAxis,
     pub axis_offset: f32,
@@ -327,40 +327,44 @@ fn select_locked(
 }
 
 fn find_targets_at_selection(
-    sel_pos: Res<SelectedPos>,
+    sel_pos: Option<Res<SelectedPos>>,
     spatial_query: SpatialQuery,
     q_map_nodes: Query<&MapNodeId>,
     sel_targets: Option<ResMut<SelectionTargets>>,
     mut commands: Commands,
 ) {
-    let intersecting_nodes = spatial_query
-        .point_intersections(**sel_pos, &SpatialQueryFilter::default())
-        .iter()
-        .filter_map(|entity_id| {
-            q_map_nodes
-                .get(*entity_id)
-                .ok()
-                .map(|node_id| LiveMapNodeId {
-                    node_id: *node_id,
-                    entity: *entity_id,
-                })
-        })
-        .collect_vec();
+    if let Some(sel_pos) = sel_pos {
+        let intersecting_nodes = spatial_query
+            .point_intersections(**sel_pos, &SpatialQueryFilter::default())
+            .iter()
+            .filter_map(|entity_id| {
+                q_map_nodes
+                    .get(*entity_id)
+                    .ok()
+                    .map(|node_id| LiveMapNodeId {
+                        node_id: *node_id,
+                        entity: *entity_id,
+                    })
+            })
+            .collect_vec();
 
-    if intersecting_nodes.is_empty() {
-        commands.remove_resource::<SelectionTargets>();
-    } else if let Some(mut existing_targets) = sel_targets {
-        // Check if the focused target is still intersecting and switch focus if not.
-        if !intersecting_nodes.contains(&existing_targets.focused) {
-            existing_targets.focused = intersecting_nodes[0];
+        if intersecting_nodes.is_empty() {
+            commands.remove_resource::<SelectionTargets>();
+        } else if let Some(mut existing_targets) = sel_targets {
+            // Check if the focused target is still intersecting and switch focus if not.
+            if !intersecting_nodes.contains(&existing_targets.focused) {
+                existing_targets.focused = intersecting_nodes[0];
+            }
+            // Update intersecting targets vec.
+            existing_targets.intersecting = intersecting_nodes;
+        } else {
+            commands.insert_resource(SelectionTargets {
+                focused: intersecting_nodes[0],
+                intersecting: intersecting_nodes,
+            });
         }
-        // Update intersecting targets vec.
-        existing_targets.intersecting = intersecting_nodes;
     } else {
-        commands.insert_resource(SelectionTargets {
-            focused: intersecting_nodes[0],
-            intersecting: intersecting_nodes,
-        });
+        commands.remove_resource::<SelectionTargets>();
     }
 }
 
@@ -448,37 +452,8 @@ fn sel_brush_test(
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<SpatialCursor>()
-        .insert_gizmo_config(
-            SelGridGizmos {},
-            GizmoConfig {
-                line_width: 1.5,
-                ..default()
-            },
-        )
-        .insert_gizmo_config(
-            SelAxisGizmos {},
-            GizmoConfig {
-                depth_bias: -0.001,
-                ..default()
-            },
-        )
-        .insert_gizmo_config(
-            SelTargetGizmos {},
-            GizmoConfig {
-                line_width: 4.0,
-                depth_bias: -0.999,
-                ..default()
-            },
-        )
-        .insert_gizmo_config(
-            SelHighlightGizmos {},
-            GizmoConfig {
-                line_width: 6.0,
-                depth_bias: -1.0,
-                ..default()
-            },
-        )
+    install_gizmos(app)
+        .init_resource::<SpatialCursor>()
         .add_event::<SelectionChanged>()
         .init_state::<SpatialCursorMode>()
         .add_computed_state::<SelIsAxisLocked>()
@@ -534,8 +509,7 @@ pub fn plugin(app: &mut App) {
                     select_locked.run_if(in_state(SelIsAxisLocked).and(on_event::<MouseMotion>)),
                 )
                     .run_if(in_state(FreelookState::Unlocked)),
-                find_targets_at_selection
-                    .run_if(resource_exists::<SelectedPos>.and(on_event::<SelectionChanged>)),
+                find_targets_at_selection.run_if(on_event::<SelectionChanged>),
                 sel_brush_test.run_if(resource_exists::<SelectedPos>),
             )
                 .chain()

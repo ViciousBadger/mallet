@@ -4,6 +4,7 @@ pub mod view;
 
 use bevy::{input::common_conditions::input_just_pressed, prelude::*};
 use binds::{Binding, InputBindingSystem};
+use map::update_editor_context;
 use view::{Gimbal, GimbalPos};
 
 use crate::{game::GameRules, util::IdGen};
@@ -114,7 +115,12 @@ pub fn plugin(app: &mut App) {
             PreUpdate,
             (
                 exit_app.run_if(input_just_pressed(Binding::Quit)),
-                playtest.run_if(input_just_pressed(Binding::Playtest)),
+                (
+                    update_editor_context.run_if(in_state(AppState::InEditor)),
+                    playtest,
+                )
+                    .chain()
+                    .run_if(input_just_pressed(Binding::Playtest)),
                 toggle_studio_light.run_if(input_just_pressed(KeyCode::KeyL)),
             )
                 .after(InputBindingSystem),

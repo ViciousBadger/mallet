@@ -17,6 +17,39 @@ pub struct SelTargetGizmos {}
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct SelHighlightGizmos {}
 
+pub fn install_gizmos(app: &mut App) -> &mut App {
+    app.insert_gizmo_config(
+        SelGridGizmos {},
+        GizmoConfig {
+            line_width: 1.5,
+            ..default()
+        },
+    )
+    .insert_gizmo_config(
+        SelAxisGizmos {},
+        GizmoConfig {
+            depth_bias: -0.001,
+            ..default()
+        },
+    )
+    .insert_gizmo_config(
+        SelTargetGizmos {},
+        GizmoConfig {
+            line_width: 4.0,
+            depth_bias: -0.999,
+            ..default()
+        },
+    )
+    .insert_gizmo_config(
+        SelHighlightGizmos {},
+        GizmoConfig {
+            line_width: 6.0,
+            depth_bias: -1.0,
+            ..default()
+        },
+    )
+}
+
 pub fn draw_sel_grid_gizmos(sel: Res<SpatialCursor>, mut gizmos: Gizmos<SelGridGizmos>) {
     let grid_line_color = css::DIM_GRAY.with_alpha(0.33);
 
