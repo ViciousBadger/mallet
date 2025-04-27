@@ -19,14 +19,11 @@ use ulid::{serde::ulid_as_u128, Ulid};
 use crate::{
     app_data::AppDataPath,
     core::binds::InputBindingSystem,
-    editor::{selection::SpatialCursor, update_editor_context, EditorContext},
+    editor::{update_editor_context, EditorContext},
     util::IdGen,
 };
 
-use super::{
-    binds::Binding,
-    view::{Gimbal, GimbalPos, TPCameraTo},
-};
+use super::{binds::Binding, view::TPCameraTo};
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct Map {
@@ -418,7 +415,6 @@ fn apply_changes_to_map(
     mut map: ResMut<Map>,
 ) {
     for mod_event in mod_events.read() {
-        info!("mod event!");
         let delta = match mod_event {
             MapChange::Add(node) => MapDelta::AddNode {
                 id: MapNodeId(id_gen.generate()),
@@ -448,7 +444,7 @@ pub fn undo_map_change(mut map: ResMut<Map>) {
     if map.can_undo() {
         map.undo();
     } else {
-        info!("no parent nodes");
+        info!("Nothing to undo");
     }
 }
 
@@ -456,12 +452,12 @@ pub fn redo_map_change(mut map: ResMut<Map>) {
     if map.can_redo() {
         map.redo();
     } else {
-        info!("no child nodes");
+        info!("Nothing to redo");
     }
 }
 
 fn reflect_map_changes_in_world(
-    new_map: Res<Map>,
+    map: Res<Map>,
     mut last_map: Local<Option<Map>>,
     mut map_lookup: ResMut<MapLookup>,
     mut deploy_events: EventWriter<DeployMapNode>,
@@ -470,7 +466,7 @@ fn reflect_map_changes_in_world(
     info!("reflecting map changes !!");
 
     if let Some(ref last_map) = *last_map {
-        for (node_id, node) in new_map.iter() {
+        for (node_id, node) in map.iter() {
             if let Some(last_node) = last_map.get_node(node_id) {
                 if node != last_node {
                     // Modify
@@ -497,7 +493,7 @@ fn reflect_map_changes_in_world(
 
         let removed_node_entities: Vec<Entity> = last_map
             .node_ids()
-            .filter(|id| !new_map.has_node(id))
+            .filter(|id| !map.has_node(id))
             .filter_map(|id| map_lookup.node_to_entity(id))
             .cloned()
             .collect();
@@ -509,7 +505,7 @@ fn reflect_map_changes_in_world(
         }
     } else {
         // Nothing to compare with, add all.
-        for (node_id, node) in new_map.iter() {
+        for (node_id, node) in map.iter() {
             let entity_id = commands.spawn(*node_id).id();
             map_lookup.insert(*node_id, entity_id);
             deploy_events.send(DeployMapNode {
@@ -520,7 +516,7 @@ fn reflect_map_changes_in_world(
         }
     }
 
-    *last_map = Some(new_map.clone());
+    *last_map = Some(map.clone());
 }
 
 fn deploy_nodes(
