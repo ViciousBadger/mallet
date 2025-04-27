@@ -39,6 +39,8 @@ pub enum Binding {
     AxisLockY,
     AxisLockZ,
     AxisLockSelected,
+    ViewProject,
+    ViewPlane,
     ResetSelAxisOffset,
     ToggleSnap,
     HoldSnap,
@@ -222,7 +224,12 @@ impl Default for InputBindingMap {
         );
         map.insert(
             Binding::AxisLockSelected,
-            BoundInput::mouse(MouseButton::Right).with_shift(),
+            BoundInput::mouse(MouseButton::Middle).with_shift(),
+        );
+        map.insert(Binding::ViewProject, BoundInput::key(KeyCode::KeyV));
+        map.insert(
+            Binding::ViewPlane,
+            BoundInput::key(KeyCode::KeyV).with_shift(),
         );
         map.insert(
             Binding::ResetSelAxisOffset,

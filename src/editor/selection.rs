@@ -9,6 +9,7 @@ use bevy::{
     },
     prelude::*,
     window::PrimaryWindow,
+    winit::cursor,
 };
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -23,7 +24,7 @@ use crate::{
         map::{brush::Brush, LiveMapNodeId, MapNodeId},
     },
     editor::freelook::FreelookState,
-    util::{input_just_toggled, Facing3d},
+    util::{enter_state, input_just_toggled, Facing3d},
 };
 
 use super::EditorSystems;
@@ -54,20 +55,21 @@ impl SpatialAxis {
 
 #[derive(Serialize, Deserialize, Clone, Resource, Default)]
 pub struct SpatialCursor {
-    pub axis: SpatialAxis,
+    // TODO: This should really be part of cursor mode,
+    // an offset for plane mode, a vec2(?) for lock mode !!!
     pub axis_offset: f32,
     pub snap: bool,
     pub origin: Vec3,
 }
 
 impl SpatialCursor {
-    pub fn grid_center(&self) -> Vec3 {
+    pub fn grid_center(&self, axis: &SpatialAxis) -> Vec3 {
         let axis_offs_aligned = if self.snap {
             self.axis_offset.round()
         } else {
             self.axis_offset
         };
-        match self.axis {
+        match axis {
             SpatialAxis::X => Vec3::new(axis_offs_aligned, self.origin.y, self.origin.z),
             SpatialAxis::Y => Vec3::new(self.origin.x, axis_offs_aligned, self.origin.z),
             SpatialAxis::Z => Vec3::new(self.origin.x, self.origin.y, axis_offs_aligned),
@@ -95,6 +97,49 @@ impl SpatialCursor {
     pub fn bounds_checked(&self, point: Vec3) -> Option<Vec3> {
         (point.cmpgt(self.min_pos()) == BVec3::TRUE && point.cmplt(self.max_pos()) == BVec3::TRUE)
             .then_some(point)
+    }
+}
+
+#[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CursorMode {
+    AxisPlane(SpatialAxis),
+    AxisLocked(SpatialAxis),
+    ViewPlane,
+    #[default]
+    ViewProject,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CursorModeKind {
+    AxisPlane,
+    AxisLocked,
+    View,
+}
+
+impl ComputedStates for CursorModeKind {
+    type SourceStates = CursorMode;
+
+    fn compute(sources: Self::SourceStates) -> Option<Self> {
+        Some(match sources {
+            CursorMode::AxisPlane(_) => CursorModeKind::AxisPlane,
+            CursorMode::AxisLocked(_) => CursorModeKind::AxisLocked,
+            CursorMode::ViewPlane => CursorModeKind::View,
+            CursorMode::ViewProject => CursorModeKind::View,
+        })
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deref)]
+pub struct CursorAxis(pub SpatialAxis);
+impl ComputedStates for CursorAxis {
+    type SourceStates = CursorMode;
+
+    fn compute(sources: Self::SourceStates) -> Option<Self> {
+        match sources {
+            CursorMode::AxisLocked(axis) => Some(CursorAxis(axis.clone())),
+            CursorMode::AxisPlane(axis) => Some(CursorAxis(axis.clone())),
+            _ => None,
+        }
     }
 }
 
@@ -129,86 +174,38 @@ pub struct SelectedNode(pub LiveMapNodeId);
 #[derive(Event)]
 pub struct SelectionChanged;
 
-#[derive(States, Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub enum SpatialCursorMode {
-    #[default]
-    Normal,
-    AxisLocked(SpatialAxis),
-}
-
-impl SpatialCursorMode {
-    pub fn is_axis_locked(&self) -> bool {
-        match self {
-            SpatialCursorMode::Normal => false,
-            SpatialCursorMode::AxisLocked(_) => true,
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub struct SelIsAxisLocked;
-impl ComputedStates for SelIsAxisLocked {
-    type SourceStates = SpatialCursorMode;
-
-    fn compute(sources: Self::SourceStates) -> Option<Self> {
-        sources.is_axis_locked().then_some(SelIsAxisLocked)
-    }
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub struct LockedAxis(SpatialAxis);
-impl ComputedStates for LockedAxis {
-    type SourceStates = SpatialCursorMode;
-
-    fn compute(sources: Self::SourceStates) -> Option<Self> {
-        match sources {
-            SpatialCursorMode::Normal => None,
-            SpatialCursorMode::AxisLocked(sel_axis) => Some(LockedAxis(sel_axis.clone())),
-        }
-    }
-}
-
-impl LockedAxis {
-    pub fn get_axis(&self) -> &SpatialAxis {
-        &self.0
-    }
-}
-
-fn switch_sel_axis(
-    new_axis: SpatialAxis,
-) -> impl Fn(ResMut<SpatialCursor>, Option<Res<SelectedPos>>) {
-    move |mut cursor, sel_pos| {
+fn axis_plane_mode(
+    axis: SpatialAxis,
+) -> impl Fn(ResMut<SpatialCursor>, ResMut<NextState<CursorMode>>, Option<Res<SelectedPos>>) {
+    move |mut cursor, mut cursor_mode, sel_pos| {
         let sel_pos = sel_pos.or_default();
-        cursor.axis_offset = match new_axis {
+        cursor.axis_offset = match axis {
             SpatialAxis::X => sel_pos.x,
             SpatialAxis::Y => sel_pos.y,
             SpatialAxis::Z => sel_pos.z,
         };
-        cursor.axis = new_axis.clone();
+        cursor_mode.set(CursorMode::AxisPlane(axis.clone()));
     }
 }
 
-fn set_axis_lock(
-    axis: SpatialAxis,
-) -> impl Fn(Res<State<SpatialCursorMode>>, ResMut<NextState<SpatialCursorMode>>) {
-    move |cur_sel_mode, mut next_sel_mode| {
-        if cur_sel_mode.get() != &SpatialCursorMode::AxisLocked(axis.clone()) {
-            next_sel_mode.set(SpatialCursorMode::AxisLocked(axis.clone()));
+fn axis_locked_mode(axis: SpatialAxis) -> impl Fn(ResMut<NextState<CursorMode>>) {
+    move |mut next_sel_mode| {
+        next_sel_mode.set(CursorMode::AxisLocked(axis.clone()));
+    }
+}
+
+fn toggle_lock_on_axis(
+    cursor_axis: Option<Res<State<CursorAxis>>>,
+    cursor_mode_kind: Res<State<CursorModeKind>>,
+    mut next_cursor_mode: ResMut<NextState<CursorMode>>,
+) {
+    if let Some(axis) = cursor_axis {
+        if let CursorModeKind::AxisLocked = **cursor_mode_kind {
+            next_cursor_mode.set(CursorMode::AxisPlane(axis.0.clone()));
         } else {
-            next_sel_mode.set(SpatialCursorMode::Normal);
+            next_cursor_mode.set(CursorMode::AxisLocked(axis.0.clone()));
         }
     }
-}
-
-fn reset_sel_mode(mut next_sel_mode: ResMut<NextState<SpatialCursorMode>>) {
-    next_sel_mode.set(SpatialCursorMode::default())
-}
-
-fn set_axis_lock_selected(
-    sel: Res<SpatialCursor>,
-    mut next_sel_mode: ResMut<NextState<SpatialCursorMode>>,
-) {
-    next_sel_mode.set(SpatialCursorMode::AxisLocked(sel.axis.clone()));
 }
 
 fn toggle_snap(mut sel: ResMut<SpatialCursor>, mut sel_changed: EventWriter<SelectionChanged>) {
@@ -220,33 +217,42 @@ fn toggle_snap(mut sel: ResMut<SpatialCursor>, mut sel_changed: EventWriter<Sele
 
 fn move_grid_origin_to_camera(
     q_camera: Query<&GlobalTransform, (With<Camera>, Changed<GlobalTransform>)>,
-    mut sel: ResMut<SpatialCursor>,
-    mut sel_changed: EventWriter<SelectionChanged>,
+    cursor_axis: Option<Res<State<CursorAxis>>>,
+    mut cursor: ResMut<SpatialCursor>,
+    mut cursor_changed: EventWriter<SelectionChanged>,
 ) {
     if let Ok(camera_transform) = q_camera.get_single() {
-        sel.origin = camera_transform.translation().round();
-        let cur_offs = sel.axis_offset;
-        match sel.axis {
-            SpatialAxis::X => {
-                sel.axis_offset = sel.axis_offset.clamp(sel.min_pos().x, sel.max_pos().x)
+        cursor.origin = camera_transform.translation().round();
+        let cur_offs = cursor.axis_offset;
+        match cursor_axis.map(|res| res.to_owned().0) {
+            Some(SpatialAxis::X) => {
+                cursor.axis_offset = cursor
+                    .axis_offset
+                    .clamp(cursor.min_pos().x, cursor.max_pos().x);
             }
-            SpatialAxis::Y => {
-                sel.axis_offset = sel.axis_offset.clamp(sel.min_pos().y, sel.max_pos().y)
+            Some(SpatialAxis::Y) => {
+                cursor.axis_offset = cursor
+                    .axis_offset
+                    .clamp(cursor.min_pos().y, cursor.max_pos().y);
             }
-            SpatialAxis::Z => {
-                sel.axis_offset = sel.axis_offset.clamp(sel.min_pos().z, sel.max_pos().z)
+            Some(SpatialAxis::Z) => {
+                cursor.axis_offset = cursor
+                    .axis_offset
+                    .clamp(cursor.min_pos().z, cursor.max_pos().z);
             }
+            None => (),
         }
-        if sel.axis_offset != cur_offs {
-            sel_changed.send(SelectionChanged);
+        if cursor.axis_offset != cur_offs {
+            cursor_changed.send(SelectionChanged);
         }
     }
 }
 
-fn select_normal(
+fn select_on_axis_plane(
     q_window: Query<&Window, With<PrimaryWindow>>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
     cursor: Res<SpatialCursor>,
+    cursor_axis: Res<State<CursorAxis>>,
     mut sel_changed: EventWriter<SelectionChanged>,
     mut commands: Commands,
 ) {
@@ -256,8 +262,8 @@ fn select_normal(
         let mouse_pos = window.cursor_position()?;
         let (cam, cam_trans) = q_camera.get_single().ok()?;
         let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
-        let plane = cursor.axis.as_plane();
-        let dist = ray.intersect_plane(cursor.grid_center(), plane)?;
+        let plane = cursor_axis.as_plane();
+        let dist = ray.intersect_plane(cursor.grid_center(&cursor_axis.0), plane)?;
         cursor.bounds_checked(cursor.snapped(ray.get_point(dist)))
     };
 
@@ -269,16 +275,16 @@ fn select_normal(
     sel_changed.send(SelectionChanged);
 }
 
-fn select_locked(
+fn select_on_locked_axis(
     q_window: Query<&Window, With<PrimaryWindow>>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
-    locked_axis: Res<State<LockedAxis>>,
+    locked_axis: Res<State<CursorAxis>>,
     selected_pos: Option<Res<SelectedPos>>,
     mut cursor: ResMut<SpatialCursor>,
     mut sel_changed: EventWriter<SelectionChanged>,
     mut commands: Commands,
 ) {
-    let axis = locked_axis.get_axis();
+    let axis = locked_axis.clone();
     let lockpos = selected_pos.or_default();
 
     let setpos = || {
@@ -287,39 +293,62 @@ fn select_locked(
         let (cam, cam_trans) = q_camera.get_single().ok()?;
         let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
         let mut towards_cam = lockpos - cam_trans.translation();
-        match axis {
+        match *axis {
             SpatialAxis::X => towards_cam.x = 0.0,
             SpatialAxis::Y => towards_cam.y = 0.0,
             SpatialAxis::Z => towards_cam.z = 0.0,
         }
-        towards_cam = towards_cam.normalize();
-        let plane = InfinitePlane3d::new(towards_cam);
+        if towards_cam.length() > 0.0 {
+            towards_cam = towards_cam.normalize();
+            let plane = InfinitePlane3d::new(towards_cam);
 
-        let dist = ray.intersect_plane(lockpos, plane)?;
-        cursor.bounds_checked(cursor.snapped(ray.get_point(dist)))
+            let dist = ray.intersect_plane(lockpos, plane)?;
+            cursor.bounds_checked(cursor.snapped(ray.get_point(dist)))
+        } else {
+            None
+        }
     };
 
     if let Some(pos) = setpos() {
-        match axis {
+        match *axis {
             SpatialAxis::X => {
-                if axis == &cursor.axis {
-                    cursor.axis_offset = pos.x
-                };
+                cursor.axis_offset = pos.x;
                 commands.insert_resource(SelectedPos(lockpos.with_x(pos.x)));
             }
             SpatialAxis::Y => {
-                if axis == &cursor.axis {
-                    cursor.axis_offset = pos.y;
-                };
+                cursor.axis_offset = pos.y;
                 commands.insert_resource(SelectedPos(lockpos.with_y(pos.y)));
             }
             SpatialAxis::Z => {
-                if axis == &cursor.axis {
-                    cursor.axis_offset = pos.z;
-                };
+                cursor.axis_offset = pos.z;
                 commands.insert_resource(SelectedPos(lockpos.with_z(pos.z)));
             }
         }
+    } else {
+        commands.remove_resource::<SelectedPos>();
+    }
+    sel_changed.send(SelectionChanged);
+}
+
+fn select_with_view_projection(
+    q_window: Query<&Window, With<PrimaryWindow>>,
+    q_camera: Query<(&Camera, &GlobalTransform)>,
+    spatial_query: SpatialQuery,
+    mut sel_changed: EventWriter<SelectionChanged>,
+    mut commands: Commands,
+) {
+    let setpos = || {
+        let window = q_window.get_single().ok()?;
+        let mouse_pos = window.cursor_position()?;
+        let (cam, cam_trans) = q_camera.get_single().ok()?;
+        let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
+
+        let hit = spatial_query.cast_ray(ray.origin, ray.direction, 1000.0, false, &default())?;
+        Some(cam_trans.translation() + ray.direction * hit.distance)
+    };
+
+    if let Some(pos) = setpos() {
+        commands.insert_resource(SelectedPos(pos));
     } else {
         commands.remove_resource::<SelectedPos>();
     }
@@ -391,6 +420,7 @@ fn scroll_intersecting(num: i32) -> impl Fn(ResMut<SelectionTargets>) {
 
 fn reset_axis_offset(
     sel_pos: Option<Res<SelectedPos>>,
+    cursor_axis: Option<Res<State<CursorAxis>>>,
     mut cursor: ResMut<SpatialCursor>,
     mut sel_changed: EventWriter<SelectionChanged>,
     mut commands: Commands,
@@ -398,11 +428,13 @@ fn reset_axis_offset(
     let selpos = sel_pos.or_default();
 
     cursor.axis_offset = 0.0;
-    match cursor.axis {
-        SpatialAxis::X => commands.insert_resource(SelectedPos(selpos.with_x(0.0))),
-        SpatialAxis::Y => commands.insert_resource(SelectedPos(selpos.with_y(0.0))),
-        SpatialAxis::Z => commands.insert_resource(SelectedPos(selpos.with_z(0.0))),
-    };
+    if let Some(cursor_axis) = cursor_axis {
+        match ***cursor_axis {
+            SpatialAxis::X => commands.insert_resource(SelectedPos(selpos.with_x(0.0))),
+            SpatialAxis::Y => commands.insert_resource(SelectedPos(selpos.with_y(0.0))),
+            SpatialAxis::Z => commands.insert_resource(SelectedPos(selpos.with_z(0.0))),
+        };
+    }
     sel_changed.send(SelectionChanged);
 }
 
@@ -455,34 +487,24 @@ pub fn plugin(app: &mut App) {
     install_gizmos(app)
         .init_resource::<SpatialCursor>()
         .add_event::<SelectionChanged>()
-        .init_state::<SpatialCursorMode>()
-        .add_computed_state::<SelIsAxisLocked>()
-        .add_computed_state::<LockedAxis>()
+        .init_state::<CursorMode>()
+        .add_computed_state::<CursorModeKind>()
+        .add_computed_state::<CursorAxis>()
         .add_systems(
             PreUpdate,
             (
                 // Switching selectin axis (what axis is da grid on)
-                (
-                    switch_sel_axis(SpatialAxis::X)
-                        .run_if(input_just_pressed(Binding::SetSelAxisX)),
-                    switch_sel_axis(SpatialAxis::Y)
-                        .run_if(input_just_pressed(Binding::SetSelAxisY)),
-                    switch_sel_axis(SpatialAxis::Z)
-                        .run_if(input_just_pressed(Binding::SetSelAxisZ)),
-                )
-                    .run_if(in_state(SpatialCursorMode::Normal)),
+                axis_plane_mode(SpatialAxis::X).run_if(input_just_pressed(Binding::SetSelAxisX)),
+                axis_plane_mode(SpatialAxis::Y).run_if(input_just_pressed(Binding::SetSelAxisY)),
+                axis_plane_mode(SpatialAxis::Z).run_if(input_just_pressed(Binding::SetSelAxisZ)),
                 // Axis locking (sel mode 2) and offset
-                set_axis_lock(SpatialAxis::X).run_if(input_just_pressed(Binding::AxisLockX)),
-                set_axis_lock(SpatialAxis::Y).run_if(input_just_pressed(Binding::AxisLockY)),
-                set_axis_lock(SpatialAxis::Z).run_if(input_just_pressed(Binding::AxisLockZ)),
-                set_axis_lock_selected.run_if(input_just_pressed(Binding::AxisLockSelected)),
-                reset_sel_mode.run_if(
-                    input_just_released(Binding::AxisLockX).or(input_just_released(
-                        Binding::AxisLockY,
-                    )
-                    .or(input_just_released(Binding::AxisLockZ)
-                        .or(input_just_released(Binding::AxisLockSelected)))),
-                ),
+                axis_locked_mode(SpatialAxis::X).run_if(input_just_pressed(Binding::AxisLockX)),
+                axis_locked_mode(SpatialAxis::Y).run_if(input_just_pressed(Binding::AxisLockY)),
+                axis_locked_mode(SpatialAxis::Z).run_if(input_just_pressed(Binding::AxisLockZ)),
+                enter_state(CursorMode::ViewProject)
+                    .run_if(input_just_pressed(Binding::ViewProject)),
+                enter_state(CursorMode::ViewPlane).run_if(input_just_pressed(Binding::ViewPlane)),
+                toggle_lock_on_axis.run_if(input_just_pressed(Binding::AxisLockSelected)),
                 reset_axis_offset.run_if(input_just_pressed(Binding::ResetSelAxisOffset)),
                 // Selected targets
                 (
@@ -504,11 +526,11 @@ pub fn plugin(app: &mut App) {
             (
                 move_grid_origin_to_camera,
                 (
-                    select_normal
-                        .run_if(in_state(SpatialCursorMode::Normal).and(on_event::<MouseMotion>)),
-                    select_locked.run_if(in_state(SelIsAxisLocked).and(on_event::<MouseMotion>)),
+                    select_on_axis_plane.run_if(in_state(CursorModeKind::AxisPlane)),
+                    select_on_locked_axis.run_if(in_state(CursorModeKind::AxisLocked)),
+                    select_with_view_projection.run_if(in_state(CursorMode::ViewProject)),
                 )
-                    .run_if(in_state(FreelookState::Unlocked)),
+                    .run_if(in_state(FreelookState::Unlocked).and(on_event::<MouseMotion>)),
                 find_targets_at_selection.run_if(on_event::<SelectionChanged>),
                 sel_brush_test.run_if(resource_exists::<SelectedPos>),
             )
@@ -518,7 +540,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             PostUpdate,
             (
-                draw_sel_grid_gizmos,
+                draw_sel_grid_gizmos.run_if(state_exists::<CursorAxis>),
                 draw_axis_line_gizmos.run_if(resource_exists::<SelectedPos>),
                 draw_sel_target_gizmos.run_if(resource_exists::<SelectionTargets>),
             )

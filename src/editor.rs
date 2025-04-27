@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod freelook;
 pub mod selection;
+pub mod tools;
 
 use crate::core::{
     view::{Gimbal, GimbalPos},
@@ -74,17 +75,22 @@ pub fn update_editor_context(
 pub struct EditorSystems;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((freelook::plugin, selection::plugin, actions::plugin))
-        .init_resource::<EditorContext>()
-        .configure_sets(
-            PreUpdate,
-            EditorSystems.run_if(in_state(AppState::InEditor)),
-        )
-        .configure_sets(Update, EditorSystems.run_if(in_state(AppState::InEditor)))
-        .configure_sets(
-            PostUpdate,
-            EditorSystems.run_if(in_state(AppState::InEditor)),
-        )
-        .add_systems(OnEnter(AppState::InEditor), init_editor)
-        .add_systems(OnExit(AppState::InEditor), teardown_editor);
+    app.add_plugins((
+        freelook::plugin,
+        selection::plugin,
+        actions::plugin,
+        tools::plugin,
+    ))
+    .init_resource::<EditorContext>()
+    .configure_sets(
+        PreUpdate,
+        EditorSystems.run_if(in_state(AppState::InEditor)),
+    )
+    .configure_sets(Update, EditorSystems.run_if(in_state(AppState::InEditor)))
+    .configure_sets(
+        PostUpdate,
+        EditorSystems.run_if(in_state(AppState::InEditor)),
+    )
+    .add_systems(OnEnter(AppState::InEditor), init_editor)
+    .add_systems(OnExit(AppState::InEditor), teardown_editor);
 }

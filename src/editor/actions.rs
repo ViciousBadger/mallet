@@ -13,7 +13,7 @@ use crate::{
             DeployMapNode, LiveMapNodeId, Map, MapChange, MapNode, MapNodeId,
         },
     },
-    editor::selection::{SpatialCursor, SpatialCursorMode},
+    editor::selection::{CursorMode, SpatialCursor},
     util::Facing3d,
 };
 
@@ -158,10 +158,6 @@ fn resize_brush_cleanup(mut commands: Commands) {
     commands.remove_resource::<ResizeBrushProcess>();
 }
 
-fn any_action_cleanup(mut next_sel_mode: ResMut<NextState<SpatialCursorMode>>) {
-    // next_sel_mode.set(SelMode::Normal);
-}
-
 fn remove_node(sel_target: Res<SelectionTargets>, mut mod_events: EventWriter<MapChange>) {
     mod_events.send(MapChange::Remove(sel_target.focused.node_id));
 }
@@ -233,6 +229,5 @@ pub fn plugin(app: &mut App) {
                 .in_set(EditorSystems),
         )
         .add_systems(OnExit(EditorAction::BuildBrush), build_brush_cleanup)
-        .add_systems(OnExit(EditorAction::ResizeBrush), resize_brush_cleanup)
-        .add_systems(OnEnter(EditorAction::None), any_action_cleanup);
+        .add_systems(OnExit(EditorAction::ResizeBrush), resize_brush_cleanup);
 }
