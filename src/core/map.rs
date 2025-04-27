@@ -17,7 +17,9 @@ use std::{collections::BTreeMap, fs::File, path::PathBuf};
 use ulid::{serde::ulid_as_u128, Ulid};
 
 use crate::{
-    app_data::AppDataPath, core::binds::InputBindingSystem, editor::selection::SpatialCursor,
+    app_data::AppDataPath,
+    core::binds::InputBindingSystem,
+    editor::{selection::SpatialCursor, update_editor_context, EditorContext},
     util::IdGen,
 };
 
@@ -44,29 +46,6 @@ pub struct MapSession {
 #[derive(Resource)]
 pub struct MapAssets {
     pub default_material: Handle<StandardMaterial>,
-}
-
-/// Persistent editor state.
-/// Used when jumping back to editor after playtesting and when saving/loading map files.
-#[derive(Resource, Serialize, Deserialize, Clone)]
-pub struct EditorContext {
-    pub camera_pos: GimbalPos,
-    pub cursor: SpatialCursor,
-}
-
-impl Default for EditorContext {
-    fn default() -> Self {
-        Self {
-            camera_pos: GimbalPos {
-                pos: vec3(0.0, 2.0, 0.0),
-                rot: Gimbal {
-                    pitch_yaw: vec2(15_f32.to_radians(), 0.0),
-                    roll: 0.0,
-                },
-            },
-            cursor: default(),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -378,19 +357,6 @@ fn insert_map_when_loaded(
     }
 }
 
-pub fn update_editor_context(
-    cursor: Res<SpatialCursor>,
-    q_camera: Query<(&GlobalTransform, &Gimbal)>,
-    mut commands: Commands,
-) {
-    let (cam_t, cam_g) = q_camera.single();
-    let new_context = EditorContext {
-        cursor: cursor.clone(),
-        camera_pos: GimbalPos::new(cam_t.translation(), *cam_g),
-    };
-    commands.insert_resource(new_context);
-}
-
 fn save_map(map_session: Res<MapSession>, map: Res<Map>, editor_context: Res<EditorContext>) {
     // TODO: async, of course this would mean it can't run on AppExit.
 
@@ -401,6 +367,8 @@ fn save_map(map_session: Res<MapSession>, map: Res<Map>, editor_context: Res<Edi
 
     let file = File::create(&map_session.save_path).unwrap();
     postcard::to_io(&map_file, file).unwrap();
+
+    info!("map saved to {:?}", map_session.save_path);
 }
 
 fn unload_map(q_live_nodes: Query<Entity, With<MapNodeId>>, mut commands: Commands) {
@@ -621,7 +589,6 @@ pub fn plugin(app: &mut App) {
     app.add_event::<MapChange>()
         .add_event::<DeployMapNode>()
         .init_resource::<MapLookup>()
-        .init_resource::<EditorContext>()
         .add_systems(Startup, (init_empty_map, start_loading_map))
         .add_systems(
             PreUpdate,

@@ -3,7 +3,6 @@ pub mod freelook;
 pub mod selection;
 
 use crate::core::{
-    map::{EditorContext, Map},
     view::{Gimbal, GimbalPos},
     AppState,
 };
@@ -12,6 +11,8 @@ use bevy::{
     prelude::*,
 };
 use freelook::Freelook;
+use selection::SpatialCursor;
+use serde::{Deserialize, Serialize};
 
 fn init_editor(editor_context: Res<EditorContext>, mut commands: Commands) {
     let spawn_pos = editor_context.camera_pos;
@@ -33,11 +34,48 @@ fn teardown_editor(_: Commands) {
     //Remove resources etc...
 }
 
+/// Persistent editor state.
+/// Used when jumping back to editor after playtesting and when saving/loading map files.
+#[derive(Resource, Serialize, Deserialize, Clone)]
+pub struct EditorContext {
+    pub camera_pos: GimbalPos,
+    pub cursor: SpatialCursor,
+}
+
+impl Default for EditorContext {
+    fn default() -> Self {
+        Self {
+            camera_pos: GimbalPos {
+                pos: vec3(0.0, 2.0, 0.0),
+                rot: Gimbal {
+                    pitch_yaw: vec2(15_f32.to_radians(), 0.0),
+                    roll: 0.0,
+                },
+            },
+            cursor: default(),
+        }
+    }
+}
+
+pub fn update_editor_context(
+    cursor: Res<SpatialCursor>,
+    q_camera: Query<(&GlobalTransform, &Gimbal)>,
+    mut commands: Commands,
+) {
+    let (cam_t, cam_g) = q_camera.single();
+    let new_context = EditorContext {
+        cursor: cursor.clone(),
+        camera_pos: GimbalPos::new(cam_t.translation(), *cam_g),
+    };
+    commands.insert_resource(new_context);
+}
+
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EditorSystems;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins((freelook::plugin, selection::plugin, actions::plugin))
+        .init_resource::<EditorContext>()
         .configure_sets(
             PreUpdate,
             EditorSystems.run_if(in_state(AppState::InEditor)),
