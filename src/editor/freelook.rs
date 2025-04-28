@@ -8,10 +8,9 @@ use crate::{
         binds::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem},
         view::Gimbal,
     },
+    editor::{selection::SelectedPos, EditorSystems},
     util::{enter_state, grab_mouse, release_mouse},
 };
-
-use super::{selection::SelectedPos, EditorSystems};
 
 #[derive(Component)]
 #[require(Camera3d, Gimbal)]

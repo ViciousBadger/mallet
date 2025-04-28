@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod cursor;
 pub mod freelook;
 pub mod selection;
 pub mod tools;
@@ -11,8 +12,8 @@ use bevy::{
     math::{vec2, vec3},
     prelude::*,
 };
+use cursor::SpatialCursor;
 use freelook::Freelook;
-use selection::SpatialCursor;
 use serde::{Deserialize, Serialize};
 
 fn init_editor(editor_context: Res<EditorContext>, mut commands: Commands) {
@@ -77,9 +78,10 @@ pub struct EditorSystems;
 pub fn plugin(app: &mut App) {
     app.add_plugins((
         freelook::plugin,
+        cursor::plugin,
         selection::plugin,
-        actions::plugin,
         tools::plugin,
+        actions::plugin,
     ))
     .init_resource::<EditorContext>()
     .configure_sets(

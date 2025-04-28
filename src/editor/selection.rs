@@ -1,141 +1,19 @@
-mod visuals;
-
-use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
-use bevy::{
-    color::palettes::css,
-    input::{
-        common_conditions::{input_just_pressed, input_just_released},
-        mouse::MouseMotion,
-    },
-    prelude::*,
-    window::PrimaryWindow,
-    winit::cursor,
-};
+use avian3d::prelude::*;
+use bevy::{color::palettes::css, input::common_conditions::input_just_pressed, prelude::*};
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
-use visuals::{
-    draw_axis_line_gizmos, draw_axis_plane_grid, draw_sel_target_gizmos, install_gizmos,
-    SelHighlightGizmos,
-};
 
 use crate::{
     core::{
         binds::{Binding, InputBindingSystem},
         map::{brush::Brush, LiveMapNodeId, MapNodeId},
     },
-    editor::freelook::FreelookState,
-    util::{enter_state, input_just_toggled, Facing3d},
+    editor::{
+        cursor::{CursorMode, SpatialAxis, SpatialCursor},
+        freelook::FreelookState,
+        EditorSystems,
+    },
+    util::Facing3d,
 };
-
-use super::EditorSystems;
-
-const SEL_DIST_LIMIT: f32 = 64.0;
-
-#[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SpatialAxis {
-    X,
-    #[default]
-    Y,
-    Z,
-}
-
-impl SpatialAxis {
-    pub fn as_unit_vec(&self) -> Vec3 {
-        match self {
-            SpatialAxis::X => Vec3::X,
-            SpatialAxis::Y => Vec3::Y,
-            SpatialAxis::Z => Vec3::Z,
-        }
-    }
-
-    pub fn as_plane(&self) -> InfinitePlane3d {
-        InfinitePlane3d::new(Dir3::new_unchecked(self.as_unit_vec()))
-    }
-}
-
-#[derive(Resource, Serialize, Deserialize, Default, Debug, Clone)]
-pub struct SpatialCursor {
-    pub mode: CursorMode,
-    pub snap: bool,
-    pub origin: Vec3,
-}
-
-#[derive(Default, Debug, Clone, PartialEq)]
-pub enum CursorModeKind {
-    #[default]
-    Pick,
-    ViewPlane,
-    AxisPlane(SpatialAxis),
-    AxisLocked(SpatialAxis),
-}
-
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-pub enum CursorMode {
-    #[default]
-    Pick,
-    ViewPlane {
-        dist: f32,
-    },
-    AxisPlane {
-        axis: SpatialAxis,
-        offset: f32,
-    },
-    AxisLocked {
-        axis: SpatialAxis,
-        origin: Vec3,
-    },
-}
-
-impl SpatialCursor {
-    // pub fn grid_center(&self) -> Vec3 {
-    //     if let Some(axis) = self.axis() {
-    //         let axis_offs_aligned = if self.snap {
-    //             self.axis_offset.round()
-    //         } else {
-    //             self.axis_offset
-    //         };
-    //         match axis {
-    //             SpatialAxis::X => Vec3::new(axis_offs_aligned, self.origin.y, self.origin.z),
-    //             SpatialAxis::Y => Vec3::new(self.origin.x, axis_offs_aligned, self.origin.z),
-    //             SpatialAxis::Z => Vec3::new(self.origin.x, self.origin.y, axis_offs_aligned),
-    //         }
-    //     } else {
-    //         Vec3::ZERO
-    //     }
-    // }
-
-    pub fn axis(&self) -> Option<SpatialAxis> {
-        match &self.mode {
-            CursorMode::Pick => None,
-            CursorMode::ViewPlane { .. } => None,
-            CursorMode::AxisPlane { axis, .. } => Some(*axis),
-            CursorMode::AxisLocked { axis, .. } => Some(*axis),
-        }
-    }
-
-    pub fn min_pos(&self) -> Vec3 {
-        self.origin - Vec3::ONE * SEL_DIST_LIMIT
-    }
-
-    pub fn max_pos(&self) -> Vec3 {
-        self.origin + Vec3::ONE * SEL_DIST_LIMIT
-    }
-
-    /// Returns the point snapped to the cursor's snapping grid.
-    pub fn snapped(&self, point: Vec3) -> Vec3 {
-        if self.snap {
-            Vec3::round(point)
-        } else {
-            point
-        }
-    }
-
-    /// Returns the point if within cursor bounds, None if outside.
-    pub fn bounds_checked(&self, point: Vec3) -> Option<Vec3> {
-        (point.cmpgt(self.min_pos()) == BVec3::TRUE && point.cmplt(self.max_pos()) == BVec3::TRUE)
-            .then_some(point)
-    }
-}
 
 /// Exists when a position is selected via the spatial cursor.
 #[derive(Resource, Deref, Clone, Copy)]
@@ -165,194 +43,10 @@ pub struct SelectedNode(pub LiveMapNodeId);
 
 /// Fired when selected position changes
 /// TODO: MOre events for different happenings? Store related data in event?
+/// or maybe.. cursor fires an event with Vec3, which is picked up in here,
+/// and turned into a SelectedPos..? decoupling
 #[derive(Event)]
 pub struct SelectionChanged;
-
-fn switch_cursor_mode(
-    mode_kind: CursorModeKind,
-) -> impl Fn(Option<Res<SelectedPos>>, Query<&GlobalTransform, With<Camera>>, ResMut<SpatialCursor>)
-{
-    move |sel_pos, q_camera, mut cursor| {
-        cursor.mode = match &mode_kind {
-            CursorModeKind::AxisPlane(axis) => {
-                let offset = if let Some(sel_pos) = sel_pos {
-                    match axis {
-                        SpatialAxis::X => sel_pos.x,
-                        SpatialAxis::Y => sel_pos.y,
-                        SpatialAxis::Z => sel_pos.z,
-                    }
-                } else {
-                    0.0
-                };
-                CursorMode::AxisPlane {
-                    axis: *axis,
-                    offset,
-                }
-            }
-            CursorModeKind::AxisLocked(axis) => CursorMode::AxisLocked {
-                axis: *axis,
-                origin: sel_pos.or_default(),
-            },
-            CursorModeKind::ViewPlane => {
-                let cam_transform = q_camera.single();
-                CursorMode::ViewPlane {
-                    dist: if let Some(sel_pos) = sel_pos {
-                        cam_transform.translation().distance(**sel_pos)
-                    } else {
-                        10.0
-                    },
-                }
-            }
-            CursorModeKind::Pick => CursorMode::Pick,
-        };
-    }
-}
-
-fn toggle_snap(mut sel: ResMut<SpatialCursor>, mut sel_changed: EventWriter<SelectionChanged>) {
-    sel.snap = !sel.snap;
-    sel_changed.send(SelectionChanged);
-    // TODO: Should the grid offset snap into place when toggling snap? Right now it de-snaps again
-    // when snap is disabled.
-}
-
-fn update_cursor_origin(
-    q_camera: Query<&GlobalTransform, (With<Camera>, Changed<GlobalTransform>)>,
-    //cursor_axis: Option<Res<State<CursorAxis>>>,
-    mut cursor: ResMut<SpatialCursor>,
-    //mut cursor_changed: EventWriter<SelectionChanged>,
-) {
-    if let Ok(camera_transform) = q_camera.get_single() {
-        cursor.origin = camera_transform.translation().round();
-        // let cur_offs = cursor.axis_offset;
-        // match cursor_axis.map(|res| res.to_owned().0) {
-        //     Some(SpatialAxis::X) => {
-        //         cursor.axis_offset = cursor
-        //             .axis_offset
-        //             .clamp(cursor.min_pos().x, cursor.max_pos().x);
-        //     }
-        //     Some(SpatialAxis::Y) => {
-        //         cursor.axis_offset = cursor
-        //             .axis_offset
-        //             .clamp(cursor.min_pos().y, cursor.max_pos().y);
-        //     }
-        //     Some(SpatialAxis::Z) => {
-        //         cursor.axis_offset = cursor
-        //             .axis_offset
-        //             .clamp(cursor.min_pos().z, cursor.max_pos().z);
-        //     }
-        //     None => (),
-        // }
-        // if cursor.axis_offset != cur_offs {
-        //     cursor_changed.send(SelectionChanged);
-        // }
-    }
-}
-
-fn in_axis_plane_mode(cursor: Res<SpatialCursor>) -> bool {
-    matches!(cursor.mode, CursorMode::AxisPlane { .. })
-}
-
-fn select_on_axis_plane(
-    q_window: Query<&Window, With<PrimaryWindow>>,
-    q_camera: Query<(&Camera, &GlobalTransform)>,
-    cursor: Res<SpatialCursor>,
-    mut sel_changed: EventWriter<SelectionChanged>,
-    mut commands: Commands,
-) {
-    let window = q_window.single();
-    let (axis, offset) = match cursor.mode {
-        CursorMode::AxisPlane { axis, offset } => (axis, offset),
-        _ => unreachable!(),
-    };
-
-    let setpos = || {
-        let mouse_pos = window.cursor_position()?;
-        let (cam, cam_trans) = q_camera.get_single().ok()?;
-        let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
-        let plane = axis.as_plane();
-        let grid_center = axis.as_unit_vec() * offset;
-        let dist = ray.intersect_plane(grid_center, plane)?;
-        cursor.bounds_checked(cursor.snapped(ray.get_point(dist)))
-    };
-
-    if let Some(pos) = setpos() {
-        commands.insert_resource(SelectedPos(pos));
-    } else {
-        commands.remove_resource::<SelectedPos>();
-    }
-    sel_changed.send(SelectionChanged);
-}
-
-fn select_on_locked_axis(
-    q_window: Query<&Window, With<PrimaryWindow>>,
-    q_camera: Query<(&Camera, &GlobalTransform)>,
-    cursor: ResMut<SpatialCursor>,
-    mut sel_changed: EventWriter<SelectionChanged>,
-    mut commands: Commands,
-) {
-    let (axis, origin) = match cursor.mode {
-        CursorMode::AxisLocked { axis, origin } => (axis, origin),
-        _ => unreachable!(),
-    };
-
-    let setpos = || {
-        let window = q_window.get_single().ok()?;
-        let mouse_pos = window.cursor_position()?;
-        let (cam, cam_trans) = q_camera.get_single().ok()?;
-        let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
-        let mut towards_cam = origin - cam_trans.translation();
-        match axis {
-            SpatialAxis::X => towards_cam.x = 0.0,
-            SpatialAxis::Y => towards_cam.y = 0.0,
-            SpatialAxis::Z => towards_cam.z = 0.0,
-        }
-        if towards_cam.length() > 0.0 {
-            towards_cam = towards_cam.normalize();
-            let plane = InfinitePlane3d::new(towards_cam);
-
-            let dist = ray.intersect_plane(origin, plane)?;
-            cursor.bounds_checked(cursor.snapped(ray.get_point(dist)))
-        } else {
-            None
-        }
-    };
-
-    if let Some(pos) = setpos() {
-        commands.insert_resource(SelectedPos(match axis {
-            SpatialAxis::X => origin.with_x(pos.x),
-            SpatialAxis::Y => origin.with_y(pos.y),
-            SpatialAxis::Z => origin.with_z(pos.z),
-        }));
-    } else {
-        commands.remove_resource::<SelectedPos>();
-    }
-    sel_changed.send(SelectionChanged);
-}
-
-fn select_by_picking(
-    q_window: Query<&Window, With<PrimaryWindow>>,
-    q_camera: Query<(&Camera, &GlobalTransform)>,
-    spatial_query: SpatialQuery,
-    mut sel_changed: EventWriter<SelectionChanged>,
-    mut commands: Commands,
-) {
-    let setpos = || {
-        let window = q_window.get_single().ok()?;
-        let mouse_pos = window.cursor_position()?;
-        let (cam, cam_trans) = q_camera.get_single().ok()?;
-        let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
-
-        let hit = spatial_query.cast_ray(ray.origin, ray.direction, 1000.0, false, &default())?;
-        Some(cam_trans.translation() + ray.direction * hit.distance)
-    };
-
-    if let Some(pos) = setpos() {
-        commands.insert_resource(SelectedPos(pos));
-    } else {
-        commands.remove_resource::<SelectedPos>();
-    }
-    sel_changed.send(SelectionChanged);
-}
 
 fn find_targets_at_selection(
     sel_pos: Option<Res<SelectedPos>>,
@@ -462,54 +156,136 @@ fn sel_brush_test(
     }
 }
 
-fn in_axis_locked_mode(cursor: Res<SpatialCursor>) -> bool {
-    matches!(cursor.mode, CursorMode::AxisLocked { .. })
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct SelAxisGizmos {}
+
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct SelTargetGizmos {}
+
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct SelHighlightGizmos {}
+
+pub fn draw_axis_line_gizmos(
+    cursor: Res<SpatialCursor>,
+    sel_pos: Res<SelectedPos>,
+    mut axis_gizmos: Gizmos<SelAxisGizmos>,
+) {
+    let sel_color = css::GOLD;
+    let min = cursor.min_pos();
+    let max = cursor.max_pos();
+
+    // X axis
+    axis_gizmos.line(
+        Vec3::new(min.x, sel_pos.y, sel_pos.z),
+        Vec3::new(max.x, sel_pos.y, sel_pos.z),
+        if matches!(
+            cursor.mode,
+            CursorMode::AxisLocked {
+                axis: SpatialAxis::X,
+                ..
+            }
+        ) {
+            sel_color
+        } else {
+            css::BLUE_VIOLET.with_alpha(0.3)
+        },
+    );
+
+    // Y axis
+    axis_gizmos.line(
+        Vec3::new(sel_pos.x, min.y, sel_pos.z),
+        Vec3::new(sel_pos.x, max.y, sel_pos.z),
+        if matches!(
+            cursor.mode,
+            CursorMode::AxisLocked {
+                axis: SpatialAxis::Y,
+                ..
+            }
+        ) {
+            sel_color
+        } else {
+            css::INDIAN_RED.with_alpha(0.3)
+        },
+    );
+
+    // Z axis
+    axis_gizmos.line(
+        Vec3::new(sel_pos.x, sel_pos.y, min.z),
+        Vec3::new(sel_pos.x, sel_pos.y, max.z),
+        if matches!(
+            cursor.mode,
+            CursorMode::AxisLocked {
+                axis: SpatialAxis::Z,
+                ..
+            }
+        ) {
+            sel_color
+        } else {
+            css::SPRING_GREEN.with_alpha(0.3)
+        },
+    );
 }
 
-fn in_view_plane_mode(cursor: Res<SpatialCursor>) -> bool {
-    matches!(cursor.mode, CursorMode::ViewPlane { .. })
-}
+pub fn draw_sel_target_gizmos(
+    sel_target: Res<SelectionTargets>,
+    q_colliders: Query<(&Collider, &GlobalTransform)>,
+    mut gizmos: Gizmos<SelTargetGizmos>,
+) {
+    for intersecting_node in sel_target.intersecting.iter() {
+        if let Ok((coll, coll_transform)) = q_colliders.get(intersecting_node.entity) {
+            let aabb = coll.aabb(coll_transform.translation(), coll_transform.rotation());
+            //.grow(Vec3::ONE * 0.01);
+            //
+            let col = if &sel_target.focused == intersecting_node {
+                css::GOLD.with_alpha(0.5)
+            } else {
+                css::DARK_GRAY.with_alpha(0.1)
+            };
 
-fn in_pick_mode(cursor: Res<SpatialCursor>) -> bool {
-    matches!(cursor.mode, CursorMode::Pick)
+            gizmos.cuboid(
+                Transform::IDENTITY
+                    .with_translation(aabb.center())
+                    .with_scale(aabb.size()),
+                col,
+            );
+        }
+    }
 }
 
 pub fn plugin(app: &mut App) {
-    install_gizmos(app)
-        .init_resource::<SpatialCursor>()
-        .add_event::<SelectionChanged>()
+    app.insert_gizmo_config(
+        SelAxisGizmos {},
+        GizmoConfig {
+            depth_bias: -0.001,
+            ..default()
+        },
+    )
+    .insert_gizmo_config(
+        SelTargetGizmos {},
+        GizmoConfig {
+            line_width: 4.0,
+            depth_bias: -0.999,
+            ..default()
+        },
+    )
+    .insert_gizmo_config(
+        SelHighlightGizmos {},
+        GizmoConfig {
+            line_width: 6.0,
+            depth_bias: -1.0,
+            ..default()
+        },
+    );
+    app.add_event::<SelectionChanged>()
         .add_systems(
             PreUpdate,
             (
-                // Axis plane mode
-                switch_cursor_mode(CursorModeKind::AxisPlane(SpatialAxis::X))
-                    .run_if(input_just_pressed(Binding::CursorModePlaneX)),
-                switch_cursor_mode(CursorModeKind::AxisPlane(SpatialAxis::Y))
-                    .run_if(input_just_pressed(Binding::CursorModePlaneY)),
-                switch_cursor_mode(CursorModeKind::AxisPlane(SpatialAxis::Z))
-                    .run_if(input_just_pressed(Binding::CursorModePlaneZ)),
-                // Axis lock mode
-                switch_cursor_mode(CursorModeKind::AxisLocked(SpatialAxis::X))
-                    .run_if(input_just_pressed(Binding::CursorModeLockX)),
-                switch_cursor_mode(CursorModeKind::AxisLocked(SpatialAxis::Y))
-                    .run_if(input_just_pressed(Binding::CursorModeLockY)),
-                switch_cursor_mode(CursorModeKind::AxisLocked(SpatialAxis::Z))
-                    .run_if(input_just_pressed(Binding::CursorModeLockZ)),
-                // View modes
-                switch_cursor_mode(CursorModeKind::Pick)
-                    .run_if(input_just_pressed(Binding::CursorModePick)),
-                switch_cursor_mode(CursorModeKind::ViewPlane)
-                    .run_if(input_just_pressed(Binding::CursorModePlaneView)),
                 // Selected targets
                 (
                     scroll_intersecting(1).run_if(input_just_pressed(Binding::SelNext)),
                     scroll_intersecting(-1).run_if(input_just_pressed(Binding::SelPrev)),
                 )
                     .run_if(resource_exists::<SelectionTargets>),
-                // Snapping
-                toggle_snap.run_if(
-                    input_just_pressed(KeyCode::KeyT).or(input_just_toggled(KeyCode::AltLeft)),
-                ),
             )
                 .after(InputBindingSystem)
                 .run_if(in_state(FreelookState::Unlocked))
@@ -518,13 +294,6 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                update_cursor_origin,
-                (
-                    select_on_axis_plane.run_if(in_axis_plane_mode),
-                    select_on_locked_axis.run_if(in_axis_locked_mode),
-                    select_by_picking.run_if(in_pick_mode),
-                )
-                    .run_if(in_state(FreelookState::Unlocked).and(on_event::<MouseMotion>)),
                 find_targets_at_selection.run_if(on_event::<SelectionChanged>),
                 sel_brush_test.run_if(resource_exists::<SelectedPos>),
             )
@@ -534,7 +303,6 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             PostUpdate,
             (
-                draw_axis_plane_grid.run_if(in_axis_plane_mode),
                 draw_axis_line_gizmos.run_if(resource_exists::<SelectedPos>),
                 draw_sel_target_gizmos.run_if(resource_exists::<SelectionTargets>),
             )

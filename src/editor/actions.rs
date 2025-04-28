@@ -10,16 +10,14 @@ use crate::{
         map::{
             brush::{Brush, BrushBounds},
             light::{Light, LightType},
-            DeployMapNode, LiveMapNodeId, Map, MapChange, MapNode, MapNodeId,
+            DeployMapNode, LiveMapNodeId, Map, MapChange, MapNode,
         },
     },
-    editor::selection::{CursorMode, SpatialCursor},
+    editor::{
+        selection::{SelTargetBrushSide, SelectedPos, SelectionTargets},
+        EditorSystems,
+    },
     util::Facing3d,
-};
-
-use super::{
-    selection::{SelTargetBrushSide, SelectedPos, SelectionTargets},
-    EditorSystems,
 };
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
