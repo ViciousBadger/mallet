@@ -32,16 +32,14 @@ pub enum Binding {
     Teleport,
 
     // Selection
-    SetSelAxisX,
-    SetSelAxisY,
-    SetSelAxisZ,
-    AxisLockX,
-    AxisLockY,
-    AxisLockZ,
-    AxisLockSelected,
-    ViewProject,
-    ViewPlane,
-    ResetSelAxisOffset,
+    CursorModePlaneX,
+    CursorModePlaneY,
+    CursorModePlaneZ,
+    CursorModeLockX,
+    CursorModeLockY,
+    CursorModeLockZ,
+    CursorModePick,
+    CursorModePlaneView,
     ToggleSnap,
     HoldSnap,
     SelNext,
@@ -207,33 +205,25 @@ impl Default for InputBindingMap {
         map.insert(Binding::FlySpeedUp, BoundInput::scroll_up());
         map.insert(Binding::FlySpeedDown, BoundInput::scroll_down());
         map.insert(Binding::Teleport, BoundInput::key(KeyCode::KeyF));
-        map.insert(Binding::SetSelAxisX, BoundInput::key(KeyCode::KeyX));
-        map.insert(Binding::SetSelAxisY, BoundInput::key(KeyCode::KeyC));
-        map.insert(Binding::SetSelAxisZ, BoundInput::key(KeyCode::KeyZ));
+        map.insert(Binding::CursorModePlaneX, BoundInput::key(KeyCode::KeyX));
+        map.insert(Binding::CursorModePlaneY, BoundInput::key(KeyCode::KeyC));
+        map.insert(Binding::CursorModePlaneZ, BoundInput::key(KeyCode::KeyZ));
         map.insert(
-            Binding::AxisLockX,
+            Binding::CursorModeLockX,
             BoundInput::key(KeyCode::KeyX).with_shift(),
         );
         map.insert(
-            Binding::AxisLockY,
+            Binding::CursorModeLockY,
             BoundInput::key(KeyCode::KeyC).with_shift(),
         );
         map.insert(
-            Binding::AxisLockZ,
+            Binding::CursorModeLockZ,
             BoundInput::key(KeyCode::KeyZ).with_shift(),
         );
+        map.insert(Binding::CursorModePick, BoundInput::key(KeyCode::KeyV));
         map.insert(
-            Binding::AxisLockSelected,
-            BoundInput::mouse(MouseButton::Middle).with_shift(),
-        );
-        map.insert(Binding::ViewProject, BoundInput::key(KeyCode::KeyV));
-        map.insert(
-            Binding::ViewPlane,
+            Binding::CursorModePlaneView,
             BoundInput::key(KeyCode::KeyV).with_shift(),
-        );
-        map.insert(
-            Binding::ResetSelAxisOffset,
-            BoundInput::key(KeyCode::Digit0),
         );
         map.insert(Binding::ToggleSnap, BoundInput::key(KeyCode::KeyT));
         map.insert(Binding::HoldSnap, BoundInput::key(KeyCode::AltLeft));
