@@ -3,6 +3,7 @@ pub mod cursor;
 pub mod freelook;
 pub mod selection;
 pub mod tools;
+pub mod ui;
 
 use crate::core::{
     view::{Gimbal, GimbalPos},
@@ -82,6 +83,7 @@ pub fn plugin(app: &mut App) {
         selection::plugin,
         tools::plugin,
         actions::plugin,
+        ui::plugin,
     ))
     .init_resource::<EditorContext>()
     .configure_sets(

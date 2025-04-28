@@ -115,8 +115,6 @@ fn apply_movement_damping(
             )
             .clamp_length_max(TOP_SPEED);
 
-        // dbg!(dampened_xz);
-
         **linear_velocity = Vec3::new(dampened_xz.x, linear_velocity.y, dampened_xz.y);
     }
 }

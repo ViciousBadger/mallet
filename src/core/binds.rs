@@ -2,10 +2,14 @@ use bevy::input::mouse::MouseWheel;
 use bevy::input::InputSystem;
 use bevy::{prelude::*, utils::HashMap};
 
+use crate::editor::ui::ClickBlocker;
+
 /// Inputs bound to application actions.
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub enum Binding {
     // Universal
+    Primary,
+    Secondary,
     Quit,
     Save,
     Playtest,
@@ -182,6 +186,8 @@ impl Default for InputBindingMap {
     fn default() -> Self {
         let mut map = HashMap::<Binding, BoundInput>::new();
 
+        map.insert(Binding::Primary, BoundInput::mouse(MouseButton::Left));
+        map.insert(Binding::Secondary, BoundInput::mouse(MouseButton::Right));
         map.insert(Binding::Quit, BoundInput::key(KeyCode::KeyQ).with_control());
         map.insert(Binding::Save, BoundInput::key(KeyCode::KeyS).with_control());
         map.insert(Binding::Playtest, BoundInput::key(KeyCode::Tab));
@@ -246,6 +252,7 @@ fn process_binding_input(
     kb_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
     bind_map: Res<InputBindingMap>,
+    click_block: Res<ClickBlocker>,
     mut scroll_input: EventReader<MouseWheel>,
     mut bind_input: ResMut<ButtonInput<Binding>>,
 ) {
@@ -261,7 +268,9 @@ fn process_binding_input(
 
         let main_just_pressed = match bound_input.source {
             BoundInputSource::Keyboard(key_code) => kb_input.just_pressed(key_code),
-            BoundInputSource::Mouse(mouse_button) => mouse_input.just_pressed(mouse_button),
+            BoundInputSource::Mouse(mouse_button) => {
+                mouse_input.just_pressed(mouse_button) && click_block.can_click()
+            }
             BoundInputSource::ScrollUp => last_scroll.is_some_and(|scroll| scroll.y > 0.0),
             BoundInputSource::ScrollDown => last_scroll.is_some_and(|scroll| scroll.y < 0.0),
         };

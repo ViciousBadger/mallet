@@ -6,7 +6,7 @@ use bevy::{
 
 use crate::{
     core::{
-        binds::InputBindingSystem,
+        binds::{Binding, InputBindingSystem},
         map::{
             brush::{Brush, BrushBounds},
             light::{Light, LightType},
@@ -189,12 +189,12 @@ pub fn plugin(app: &mut App) {
                     start_building_brush_here.run_if(
                         resource_exists::<SelectedPos>
                             .and(not(resource_exists::<SelTargetBrushSide>))
-                            .and(input_just_pressed(MouseButton::Left)),
+                            .and(input_just_pressed(Binding::Primary)),
                     ),
                     start_resizing_brush.run_if(
                         resource_exists::<SelectionTargets>
                             .and(resource_exists::<SelTargetBrushSide>)
-                            .and(input_just_pressed(MouseButton::Left)),
+                            .and(input_just_pressed(Binding::Primary)),
                     ),
                     remove_node.run_if(
                         input_just_pressed(KeyCode::Delete)
@@ -208,14 +208,14 @@ pub fn plugin(app: &mut App) {
                 (
                     build_brush_draw_gizmos.run_if(resource_exists::<SelectedPos>),
                     end_building_brush_here.run_if(
-                        resource_exists::<SelectedPos>.and(input_just_pressed(MouseButton::Left)),
+                        resource_exists::<SelectedPos>.and(input_just_pressed(Binding::Primary)),
                     ),
                 )
                     .run_if(in_state(EditorAction::BuildBrush)),
                 (
                     live_brush_resize.run_if(resource_exists::<SelectedPos>),
                     end_resizing_brush_here.run_if(
-                        resource_exists::<SelectedPos>.and(input_just_released(MouseButton::Left)),
+                        resource_exists::<SelectedPos>.and(input_just_released(Binding::Primary)),
                     ),
                 )
                     .run_if(in_state(EditorAction::ResizeBrush)),
