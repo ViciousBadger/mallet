@@ -1,8 +1,10 @@
-use crate::core::binds::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem};
 use avian3d::prelude::{narrow_phase::NarrowPhaseSet, *};
 use bevy::{math::vec2, prelude::*};
 
-use super::GameSystems;
+use crate::{
+    core::binds::{Binding, BindingAxis, BindingAxisFns, InputBindingSystem},
+    game::GameSystems,
+};
 
 #[derive(Component)]
 pub struct PlayerActor;

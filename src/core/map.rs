@@ -4,7 +4,6 @@ pub mod light;
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
     input::common_conditions::{input_just_pressed, input_just_released},
-    math::{vec2, vec3},
     prelude::*,
     tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
 };
@@ -18,12 +17,13 @@ use ulid::{serde::ulid_as_u128, Ulid};
 
 use crate::{
     app_data::AppDataPath,
-    core::binds::InputBindingSystem,
+    core::{
+        binds::{Binding, InputBindingSystem},
+        view::TPCameraTo,
+    },
     editor::{update_editor_context, EditorContext},
     util::IdGen,
 };
-
-use super::{binds::Binding, view::TPCameraTo};
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct Map {

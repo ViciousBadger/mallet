@@ -2,12 +2,13 @@ use bevy::{input::mouse::MouseMotion, math::vec2, prelude::*};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::binds::{BindingAxis, BindingAxisFns, InputBindingSystem},
+    core::{
+        binds::{BindingAxis, BindingAxisFns, InputBindingSystem},
+        AppState,
+    },
     editor::freelook::FreelookState,
     util::FromPitchYawRoll,
 };
-
-use super::AppState;
 
 /// For gimbal-locked rotation.
 /// Pitch=X, Yaw=Y, Roll=Z
