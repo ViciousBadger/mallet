@@ -1,5 +1,4 @@
 pub mod brush;
-pub mod library;
 pub mod light;
 
 use avian3d::prelude::{Collider, RigidBody};
@@ -18,7 +17,6 @@ use daggy::{Dag, NodeIndex, Walker};
 use light::Light;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs::File, path::PathBuf};
-use ulid::{serde::ulid_as_u128, Ulid};
 
 use crate::{
     app_data::AppDataPath,
@@ -27,18 +25,18 @@ use crate::{
         view::TPCameraTo,
     },
     editor::{update_editor_context, EditorContext},
-    util::IdGen,
+    util::{Id, IdGen},
 };
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct Map {
-    state: BTreeMap<MapNodeId, MapNode>,
+    state: BTreeMap<Id, MapNode>,
     cur_delta_idx: NodeIndex<u32>,
     delta_graph: Dag<MapDelta, ()>,
 }
 
 #[derive(Resource, Default, Deref, DerefMut)]
-pub struct MapLookup(BiHashMap<MapNodeId, Entity>);
+pub struct MapLookup(BiHashMap<Id, Entity>);
 
 #[derive(Resource)]
 pub struct MapSession {
@@ -56,24 +54,7 @@ pub struct MapFile {
     editor: EditorContext,
 }
 
-/// Persistent identifier for map nodes.
-#[derive(
-    Deref,
-    Debug,
-    PartialOrd,
-    Ord,
-    PartialEq,
-    Eq,
-    Hash,
-    Clone,
-    Copy,
-    Serialize,
-    Deserialize,
-    Component,
-)]
-pub struct MapNodeId(#[serde(with = "ulid_as_u128")] Ulid);
-
-impl std::fmt::Display for MapNodeId {
+impl std::fmt::Display for Id {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
@@ -82,7 +63,7 @@ impl std::fmt::Display for MapNodeId {
 /// Combines node id with its instantiated entity
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LiveMapNodeId {
-    pub node_id: MapNodeId,
+    pub node_id: Id,
     pub entity: Entity,
 }
 
@@ -96,8 +77,8 @@ pub enum MapNode {
 #[derive(Event)]
 pub enum MapChange {
     Add(MapNode),
-    Modify(MapNodeId, MapNode),
-    Remove(MapNodeId),
+    Modify(Id, MapNode),
+    Remove(Id),
 }
 
 /// Request to deploy a map node in the world. Entity id is expected to be an entity with a MapNodeId component.
@@ -113,16 +94,16 @@ pub struct DeployMapNode {
 pub enum MapDelta {
     Nop,
     AddNode {
-        id: MapNodeId,
+        id: Id,
         node: MapNode,
     },
     ModifyNode {
-        id: MapNodeId,
+        id: Id,
         before: MapNode,
         after: MapNode,
     },
     RemoveNode {
-        id: MapNodeId,
+        id: Id,
         node: MapNode,
     },
 }
@@ -150,19 +131,19 @@ impl Map {
         self.state.values()
     }
 
-    pub fn node_ids(&self) -> impl Iterator<Item = &MapNodeId> {
+    pub fn node_ids(&self) -> impl Iterator<Item = &Id> {
         self.state.keys()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&MapNodeId, &MapNode)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Id, &MapNode)> {
         self.state.iter()
     }
 
-    pub fn get_node(&self, id: &MapNodeId) -> Option<&MapNode> {
+    pub fn get_node(&self, id: &Id) -> Option<&MapNode> {
         self.state.get(id)
     }
 
-    pub fn has_node(&self, id: &MapNodeId) -> bool {
+    pub fn has_node(&self, id: &Id) -> bool {
         self.state.contains_key(id)
     }
 
@@ -255,11 +236,11 @@ impl Map {
 }
 
 impl MapLookup {
-    pub fn node_to_entity(&self, node_id: &MapNodeId) -> Option<&Entity> {
+    pub fn node_to_entity(&self, node_id: &Id) -> Option<&Entity> {
         self.0.get_by_left(node_id)
     }
 
-    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&MapNodeId> {
+    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&Id> {
         self.0.get_by_right(entity_id)
     }
 }
@@ -373,7 +354,7 @@ fn save_map(map_session: Res<MapSession>, map: Res<Map>, editor_context: Res<Edi
     info!("map saved to {:?}", map_session.save_path);
 }
 
-fn unload_map(q_live_nodes: Query<Entity, With<MapNodeId>>, mut commands: Commands) {
+fn unload_map(q_live_nodes: Query<Entity, With<Id>>, mut commands: Commands) {
     info!("unload map with {} nodes", q_live_nodes.iter().count());
     for entity in q_live_nodes.iter() {
         commands.entity(entity).despawn_recursive();
@@ -435,7 +416,7 @@ fn apply_changes_to_map(
     for mod_event in mod_events.read() {
         let delta = match mod_event {
             MapChange::Add(node) => MapDelta::AddNode {
-                id: MapNodeId(id_gen.generate()),
+                id: Id(id_gen.generate()),
                 node: node.clone(),
             },
             MapChange::Modify(node_id, node) => {
@@ -548,7 +529,7 @@ fn deploy_nodes(
         entity_commands.despawn_descendants();
         // NOTE: When this is applied, the Children component will be gone, so it's important to
         // despawn descendants BEFORE retaining.
-        entity_commands.retain::<MapNodeId>();
+        entity_commands.retain::<Id>();
 
         // Once this match is stupid large it should be split up. Perhaps using observer pattern,
         // fire an event using MapNodeKind generic. Register listeners for each kind.

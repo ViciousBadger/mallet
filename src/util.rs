@@ -4,7 +4,8 @@ use bevy::{
     state::state::FreelyMutableState,
     window::{CursorGrabMode, PrimaryWindow},
 };
-use ulid::Ulid;
+use serde::{Deserialize, Serialize};
+use ulid::{serde::ulid_as_u128, Ulid};
 
 #[derive(Resource)]
 pub struct IdGen(ulid::Generator);
@@ -78,3 +79,20 @@ where
 {
     move |inputs: Res<ButtonInput<T>>| inputs.just_pressed(input) || inputs.just_released(input)
 }
+
+/// Persistent identifier.
+#[derive(
+    Deref,
+    Debug,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    Hash,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    Component,
+)]
+pub struct Id(#[serde(with = "ulid_as_u128")] pub Ulid);

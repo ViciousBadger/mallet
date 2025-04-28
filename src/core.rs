@@ -1,4 +1,5 @@
 pub mod binds;
+pub mod content;
 pub mod map;
 pub mod view;
 

@@ -5,14 +5,14 @@ use itertools::Itertools;
 use crate::{
     core::{
         binds::{Binding, InputBindingSystem},
-        map::{brush::Brush, LiveMapNodeId, MapNodeId},
+        map::{brush::Brush, LiveMapNodeId},
     },
     editor::{
         cursor::{CursorMode, SpatialAxis, SpatialCursor},
         freelook::FreelookState,
         EditorSystems,
     },
-    util::Facing3d,
+    util::{Facing3d, Id},
 };
 
 /// Exists when a position is selected via the spatial cursor.
@@ -51,7 +51,7 @@ pub struct SelectionChanged;
 fn find_targets_at_selection(
     sel_pos: Option<Res<SelectedPos>>,
     spatial_query: SpatialQuery,
-    q_map_nodes: Query<&MapNodeId>,
+    q_map_nodes: Query<&Id>,
     sel_targets: Option<ResMut<SelectionTargets>>,
     mut commands: Commands,
 ) {
