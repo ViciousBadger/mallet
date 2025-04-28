@@ -1,4 +1,11 @@
-use bevy::prelude::*;
+use bevy::{
+    asset::RenderAssetUsages,
+    prelude::*,
+    render::mesh::{
+        Indices,
+        PrimitiveTopology::{self, TriangleList},
+    },
+};
 use serde::{Deserialize, Serialize};
 
 use crate::util::Facing3d;
@@ -37,45 +44,44 @@ impl BrushBounds {
     }
 
     pub fn sides_local(&self) -> impl Iterator<Item = BrushSide> {
-        // TODO: might as well pre-calculate sides on new()
-        // and store them so they don't have to be created on every call.
-        let half_size = self.size() / 2.0;
+        let size = self.size();
+        let half_size = size / 2.0;
         vec![
             // X-
             BrushSide {
                 facing: Facing3d::NegX,
                 pos: Vec3::NEG_X * half_size.x,
-                plane: Plane3d::new(Vec3::NEG_X, Vec2::new(half_size.y, half_size.z)),
+                size: Vec2::new(size.z, size.y),
             },
             // X+
             BrushSide {
                 facing: Facing3d::X,
                 pos: Vec3::X * half_size.x,
-                plane: Plane3d::new(Vec3::X, Vec2::new(half_size.y, half_size.z)),
+                size: Vec2::new(size.z, size.y),
             },
             // Z-
             BrushSide {
                 facing: Facing3d::NegZ,
                 pos: Vec3::NEG_Z * half_size.z,
-                plane: Plane3d::new(Vec3::NEG_Z, Vec2::new(half_size.x, half_size.y)),
+                size: Vec2::new(size.x, size.y),
             },
             // Z+
             BrushSide {
                 facing: Facing3d::Z,
                 pos: Vec3::Z * half_size.z,
-                plane: Plane3d::new(Vec3::Z, Vec2::new(half_size.x, half_size.y)),
+                size: Vec2::new(size.x, size.y),
             },
             // Y-
             BrushSide {
                 facing: Facing3d::NegY,
                 pos: Vec3::NEG_Y * half_size.y,
-                plane: Plane3d::new(Vec3::NEG_Y, Vec2::new(half_size.x, half_size.z)),
+                size: Vec2::new(size.x, size.z),
             },
             // Y+
             BrushSide {
                 facing: Facing3d::Y,
                 pos: Vec3::Y * half_size.y,
-                plane: Plane3d::new(Vec3::Y, Vec2::new(half_size.x, half_size.z)),
+                size: Vec2::new(size.x, size.z),
             },
         ]
         .into_iter()
@@ -103,8 +109,54 @@ impl BrushBounds {
     }
 }
 
+#[derive(Clone)]
 pub struct BrushSide {
     pub facing: Facing3d,
     pub pos: Vec3,
-    pub plane: Plane3d,
+    pub size: Vec2,
+}
+
+impl Meshable for BrushSide {
+    type Output = BrushSideMeshBuilder;
+
+    fn mesh(&self) -> Self::Output {
+        BrushSideMeshBuilder(self.clone())
+    }
+}
+
+pub struct BrushSideMeshBuilder(BrushSide);
+
+impl MeshBuilder for BrushSideMeshBuilder {
+    fn build(&self) -> Mesh {
+        const VERTS: usize = 4;
+        let mut positions: Vec<Vec3> = Vec::with_capacity(VERTS);
+        let mut normals: Vec<[f32; 3]> = Vec::with_capacity(VERTS);
+        let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(VERTS);
+
+        let rotation = Quat::from_rotation_arc(Vec3::NEG_Z, *self.0.facing.as_dir());
+        let size = self.0.size;
+
+        // Vertices (and vertex data)
+        for z in 0..=1 {
+            for x in 0..=1 {
+                let tx = x as f32;
+                let tz = z as f32;
+                let pos = rotation * Vec3::new((-0.5 + tx) * size.x, (-0.5 + tz) * size.y, 0.0);
+                positions.push(pos);
+                normals.push(self.0.facing.as_dir().to_array());
+                uvs.push([tx * size.x * 0.1, tz * size.y * 0.1]);
+            }
+        }
+
+        let indices = vec![3, 1, 2, 0, 2, 1];
+
+        Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_indices(Indices::U32(indices))
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    }
 }

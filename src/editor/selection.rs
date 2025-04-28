@@ -138,12 +138,9 @@ fn sel_brush_test(
             gizmos.rect(
                 Isometry3d::new(
                     closest_side.pos,
-                    Quat::from_rotation_arc(
-                        Vec3::Y,
-                        closest_side.plane.normal.any_orthonormal_vector(),
-                    ),
+                    Quat::from_rotation_arc(Vec3::NEG_Z, *closest_side.facing.as_dir()),
                 ),
-                closest_side.plane.half_size * 2.,
+                closest_side.size,
                 css::INDIAN_RED,
             );
 

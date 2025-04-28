@@ -41,6 +41,19 @@ pub enum Facing3d {
     NegZ,
 }
 
+impl Facing3d {
+    pub fn as_dir(&self) -> Dir3 {
+        match self {
+            Facing3d::X => Dir3::X,
+            Facing3d::NegX => Dir3::NEG_X,
+            Facing3d::Y => Dir3::Y,
+            Facing3d::NegY => Dir3::NEG_Y,
+            Facing3d::Z => Dir3::Z,
+            Facing3d::NegZ => Dir3::NEG_Z,
+        }
+    }
+}
+
 pub fn enter_state<S: FreelyMutableState>(new_state: S) -> impl Fn(ResMut<NextState<S>>) {
     move |mut next_state| {
         next_state.set(new_state.clone());

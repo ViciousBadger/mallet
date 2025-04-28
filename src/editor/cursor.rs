@@ -379,6 +379,21 @@ pub fn draw_axis_plane_grid(cursor: Res<SpatialCursor>, mut gizmos: Gizmos<SelGr
     // TODO: get axis in view-plane mode. either calc it in the cursor using origin or something else.
 }
 
+pub fn draw_view_plane(cursor: Res<SpatialCursor>, mut gizmos: Gizmos<SelGridGizmos>) {
+    let grid_line_color = css::DIM_GRAY.with_alpha(0.33);
+
+    let dist = match cursor.mode {
+        CursorMode::ViewPlane { dist } => dist,
+        _ => unreachable!(),
+    };
+
+    gizmos.sphere(
+        Isometry3d::from_translation(cursor.origin),
+        dist,
+        grid_line_color,
+    );
+}
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<SpatialCursor>();
     app.insert_gizmo_config(
@@ -433,6 +448,10 @@ pub fn plugin(app: &mut App) {
     );
     app.add_systems(
         PostUpdate,
-        (draw_axis_plane_grid.run_if(in_axis_plane_mode),).in_set(EditorSystems),
+        (
+            draw_axis_plane_grid.run_if(in_axis_plane_mode),
+            draw_view_plane.run_if(in_view_plane_mode),
+        )
+            .in_set(EditorSystems),
     );
 }

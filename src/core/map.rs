@@ -1,8 +1,13 @@
 pub mod brush;
+pub mod library;
 pub mod light;
 
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
+    image::{
+        ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler,
+        ImageSamplerDescriptor,
+    },
     input::common_conditions::{input_just_pressed, input_just_released},
     prelude::*,
     tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
@@ -390,12 +395,25 @@ fn init_empty_map(
     }
 }
 
+fn brush_texture_settings(settings: &mut ImageLoaderSettings) {
+    *settings = ImageLoaderSettings {
+        sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+            address_mode_u: ImageAddressMode::Repeat,
+            address_mode_v: ImageAddressMode::Repeat,
+            mag_filter: ImageFilterMode::Linear,
+            min_filter: ImageFilterMode::Linear,
+            ..default()
+        }),
+        ..default()
+    }
+}
+
 fn load_map_assets(
     asset_server: Res<AssetServer>,
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let texture = asset_server.load("concrete.png");
+    let texture = asset_server.load_with_settings("concrete.png", brush_texture_settings);
 
     let material = materials.add(StandardMaterial {
         base_color_texture: Some(texture),
@@ -567,7 +585,7 @@ fn deploy_nodes(
                     commands
                         .spawn((
                             Transform::IDENTITY.with_translation(side.pos),
-                            Mesh3d(meshes.add(side.plane.mesh())),
+                            Mesh3d(meshes.add(side.mesh())),
                             //MeshMaterial3d(materials.add(color)),
                             MeshMaterial3d(map_assets.default_material.clone()),
                         ))
