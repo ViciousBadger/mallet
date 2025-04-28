@@ -45,3 +45,5 @@ impl BaseContentLib {
         self.surfaces.values().next().unwrap()
     }
 }
+
+pub fn plugin(app: &mut App) {}

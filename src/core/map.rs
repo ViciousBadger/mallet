@@ -394,7 +394,8 @@ fn load_map_assets(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let texture = asset_server.load_with_settings("concrete.png", brush_texture_settings);
+    let texture =
+        asset_server.load_with_settings("base_lib/surfaces/concrete.png", brush_texture_settings);
 
     let material = materials.add(StandardMaterial {
         base_color_texture: Some(texture),
