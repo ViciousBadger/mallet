@@ -545,12 +545,9 @@ fn deploy_nodes(
                             range: light.range,
                             ..default()
                         },
-                        light::LightType::Spot => PointLight {
-                            color: light.color,
-                            intensity: light.intensity,
-                            range: light.range,
-                            ..default()
-                        },
+                        light::LightType::Spot => {
+                            unimplemented!("u would have to rotate it n shit")
+                        }
                     },
                 ));
             }

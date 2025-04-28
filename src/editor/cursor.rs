@@ -300,9 +300,38 @@ fn select_on_locked_axis(
     sel_changed.send(SelectionChanged);
 }
 
+fn select_on_view_plane(
+    q_window: Query<&Window, With<PrimaryWindow>>,
+    q_camera: Query<(&Camera, &GlobalTransform)>,
+    cursor: ResMut<SpatialCursor>,
+    mut sel_changed: EventWriter<SelectionChanged>,
+    mut commands: Commands,
+) {
+    let dist = match cursor.mode {
+        CursorMode::ViewPlane { dist } => dist,
+        _ => unreachable!(),
+    };
+
+    let setpos = || {
+        let window = q_window.get_single().ok()?;
+        let mouse_pos = window.cursor_position()?;
+        let (cam, cam_trans) = q_camera.get_single().ok()?;
+        let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
+        Some(cursor.snapped(cam_trans.translation() + ray.direction * dist))
+    };
+
+    if let Some(pos) = setpos() {
+        commands.insert_resource(SelectedPos(pos));
+    } else {
+        commands.remove_resource::<SelectedPos>();
+    }
+    sel_changed.send(SelectionChanged);
+}
+
 fn select_by_picking(
     q_window: Query<&Window, With<PrimaryWindow>>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
+    cursor: ResMut<SpatialCursor>,
     spatial_query: SpatialQuery,
     mut sel_changed: EventWriter<SelectionChanged>,
     mut commands: Commands,
@@ -314,7 +343,7 @@ fn select_by_picking(
         let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
 
         let hit = spatial_query.cast_ray(ray.origin, ray.direction, 1000.0, false, &default())?;
-        Some(cam_trans.translation() + ray.direction * hit.distance)
+        Some(cursor.snapped(cam_trans.translation() + ray.direction * hit.distance))
     };
 
     if let Some(pos) = setpos() {
@@ -397,6 +426,7 @@ pub fn plugin(app: &mut App) {
                 select_on_axis_plane.run_if(in_axis_plane_mode),
                 select_on_locked_axis.run_if(in_axis_locked_mode),
                 select_by_picking.run_if(in_pick_mode),
+                select_on_view_plane.run_if(in_view_plane_mode),
             )
                 .run_if(in_state(FreelookState::Unlocked).and(on_event::<MouseMotion>)),
         ),
