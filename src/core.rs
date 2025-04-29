@@ -104,7 +104,7 @@ fn toggle_studio_light(
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((binds::plugin, view::plugin, map::plugin))
+    app.add_plugins((content::plugin, binds::plugin, view::plugin, map::plugin))
         .init_resource::<IdGen>()
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(AmbientLight::NONE)

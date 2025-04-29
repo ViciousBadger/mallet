@@ -1,10 +1,18 @@
+use std::{
+    fs::{self, File},
+    path::{Path, PathBuf},
+    str::FromStr,
+};
+
 use avian3d::parry::utils::hashmap::HashMap;
 use bevy::prelude::*;
+use blake3::Hash;
 use serde::{Deserialize, Serialize};
+use walkdir::WalkDir;
 
-use crate::util::Id;
+use crate::util::{Id, IdGen};
 
-#[derive(Default, Resource, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct ContentLib {
     pub surfaces: HashMap<Id, Content<Surface>>,
     pub sounds: HashMap<Id, Content<Sound>>,
@@ -19,25 +27,62 @@ impl ContentLib {
     pub fn get_sound(&self, id: &Id) -> Option<&Content<Sound>> {
         self.sounds.get(id)
     }
+
+    pub fn sync(&mut self, path: &Path, id_gen: &mut IdGen) {
+        // Check for new files.
+        info!("walk {:?}!", path);
+
+        info!(
+            "supported formats {:?}",
+            bevy::image::ImageLoader::SUPPORTED_FORMATS
+        );
+        info!(
+            "supported extensions {:?}",
+            bevy::image::ImageLoader::SUPPORTED_FILE_EXTENSIONS
+        );
+
+        for entry in WalkDir::new(path)
+            .into_iter()
+            .filter_map(|entry| entry.ok().filter(|entry| entry.file_type().is_file()))
+        {
+            let path = entry.path();
+            info!("{:?}", path);
+            match path.extension() {
+                Some(val) if val == "png" => {
+                    let hash = blake3::hash(&fs::read(path).unwrap());
+                    let surf: Content<Surface> = Content {
+                        path: path.to_owned(),
+                        hash,
+                        data: default(),
+                    };
+                    info!("new surface: {:?}", surf);
+                    self.surfaces.insert(id_gen.generate(), surf);
+                }
+                _ => (),
+            }
+        }
+
+        // TODO: Check for modified files.
+
+        // TODO: Check for moved files.
+    }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Content<T> {
-    pub path: String,
+    pub path: PathBuf,
     pub hash: blake3::Hash,
     pub data: T,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Surface {
     pub roughness: f32,
     pub reflectance: f32,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Sound {
-    pub asset_path: String,
-}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Sound;
 
 impl Default for Surface {
     fn default() -> Self {
@@ -48,17 +93,42 @@ impl Default for Surface {
     }
 }
 
-#[derive(Deref)]
-pub struct BaseContentLib(pub ContentLib);
+/// A content library for base_content
+#[derive(Resource)]
+pub struct BaseContent {
+    pub lib: ContentLib,
+    default_surface_id: Id,
+}
 
-impl BaseContentLib {
-    pub fn new() {
-        todo!()
-    }
-
-    pub fn default_surface(&self) -> &Surface {
-        &self.surfaces.values().next().unwrap().data
+impl BaseContent {
+    pub fn default_surface(&self) -> &Content<Surface> {
+        self.lib.surfaces.get(&self.default_surface_id).unwrap()
     }
 }
 
-pub fn plugin(app: &mut App) {}
+fn init_base_content_lib(mut id_gen: ResMut<IdGen>, mut commands: Commands) {
+    let lib_path = Path::new("assets/base_content.lib"); // save lib here to keep id's consistent
+    let content_path = Path::new("assets/base_content/");
+
+    let mut lib = if lib_path.is_file() {
+        postcard::from_bytes(&std::fs::read(lib_path).unwrap()).unwrap()
+    } else {
+        ContentLib::default()
+    };
+
+    lib.sync(content_path, &mut id_gen);
+
+    let file = File::create(lib_path).unwrap();
+    postcard::to_io(&lib, file).unwrap();
+
+    commands.insert_resource(BaseContent {
+        default_surface_id: *lib.surfaces.keys().next().unwrap(),
+        lib,
+    });
+    //
+    // TODO: save
+}
+
+pub fn plugin(app: &mut App) {
+    app.add_systems(Startup, init_base_content_lib);
+}

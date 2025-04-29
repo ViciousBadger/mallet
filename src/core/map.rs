@@ -394,8 +394,8 @@ fn load_map_assets(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let texture =
-        asset_server.load_with_settings("base_lib/surfaces/concrete.png", brush_texture_settings);
+    let texture = asset_server
+        .load_with_settings("base_content/surfaces/concrete.png", brush_texture_settings);
 
     let material = materials.add(StandardMaterial {
         base_color_texture: Some(texture),
@@ -417,7 +417,7 @@ fn apply_changes_to_map(
     for mod_event in mod_events.read() {
         let delta = match mod_event {
             MapChange::Add(node) => MapDelta::AddNode {
-                id: Id(id_gen.generate()),
+                id: id_gen.generate(),
                 node: node.clone(),
             },
             MapChange::Modify(node_id, node) => {

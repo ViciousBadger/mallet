@@ -17,8 +17,8 @@ impl Default for IdGen {
 }
 
 impl IdGen {
-    pub fn generate(&mut self) -> Ulid {
-        self.0.generate().unwrap()
+    pub fn generate(&mut self) -> Id {
+        Id(self.0.generate().unwrap())
     }
 }
 
