@@ -6,14 +6,30 @@ use crate::util::Id;
 
 #[derive(Default, Resource, Serialize, Deserialize)]
 pub struct ContentLib {
-    pub surfaces: HashMap<Id, Surface>,
-    pub sounds: HashMap<Id, Sound>,
+    pub surfaces: HashMap<Id, Content<Surface>>,
+    pub sounds: HashMap<Id, Content<Sound>>,
     // TODO: 3d models, ..??
+}
+
+impl ContentLib {
+    pub fn get_surface(&self, id: &Id) -> Option<&Content<Surface>> {
+        self.surfaces.get(id)
+    }
+
+    pub fn get_sound(&self, id: &Id) -> Option<&Content<Sound>> {
+        self.sounds.get(id)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Content<T> {
+    pub path: String,
+    pub hash: blake3::Hash,
+    pub data: T,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Surface {
-    pub asset_path: String,
     pub roughness: f32,
     pub reflectance: f32,
 }
@@ -23,10 +39,9 @@ pub struct Sound {
     pub asset_path: String,
 }
 
-impl Surface {
-    pub fn new(texture_asset_path: String) -> Self {
+impl Default for Surface {
+    fn default() -> Self {
         Self {
-            asset_path: texture_asset_path,
             roughness: 1.0,
             reflectance: 0.0,
         }
@@ -42,7 +57,7 @@ impl BaseContentLib {
     }
 
     pub fn default_surface(&self) -> &Surface {
-        self.surfaces.values().next().unwrap()
+        &self.surfaces.values().next().unwrap().data
     }
 }
 
