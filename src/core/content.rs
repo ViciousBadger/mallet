@@ -45,8 +45,8 @@ impl ContentLib {
             .into_iter()
             .filter_map(|entry| entry.ok().filter(|entry| entry.file_type().is_file()))
         {
+            //let path = entry.path().strip_prefix(Path::new("assets/")).unwrap();
             let path = entry.path();
-            info!("{:?}", path);
             match path.extension() {
                 Some(val) if val == "png" => {
                     let hash = blake3::hash(&fs::read(path).unwrap());
@@ -112,6 +112,7 @@ fn init_base_content_lib(mut id_gen: ResMut<IdGen>, mut commands: Commands) {
 
     let mut lib = if lib_path.is_file() {
         postcard::from_bytes(&std::fs::read(lib_path).unwrap()).unwrap()
+        // ron::from_str(&std::fs::read_to_string(lib_path).unwrap()).unwrap()
     } else {
         ContentLib::default()
     };
@@ -120,6 +121,7 @@ fn init_base_content_lib(mut id_gen: ResMut<IdGen>, mut commands: Commands) {
 
     let file = File::create(lib_path).unwrap();
     postcard::to_io(&lib, file).unwrap();
+    // std::fs::write(lib_path, ron::to_string(&lib).unwrap()).unwrap();
 
     commands.insert_resource(BaseContent {
         default_surface_id: *lib.surfaces.keys().next().unwrap(),
