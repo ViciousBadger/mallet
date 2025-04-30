@@ -1,3 +1,4 @@
+pub mod asset_storer;
 pub mod binds;
 pub mod content;
 pub mod map;
@@ -104,25 +105,31 @@ fn toggle_studio_light(
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((content::plugin, binds::plugin, view::plugin, map::plugin))
-        .init_resource::<IdGen>()
-        .insert_resource(ClearColor(Color::BLACK))
-        .insert_resource(AmbientLight::NONE)
-        .init_state::<AppState>()
-        .enable_state_scoped_entities::<AppState>()
-        .add_systems(Startup, init)
-        .add_systems(
-            PreUpdate,
+    app.add_plugins((
+        content::plugin,
+        asset_storer::plugin,
+        binds::plugin,
+        view::plugin,
+        map::plugin,
+    ))
+    .init_resource::<IdGen>()
+    .insert_resource(ClearColor(Color::BLACK))
+    .insert_resource(AmbientLight::NONE)
+    .init_state::<AppState>()
+    .enable_state_scoped_entities::<AppState>()
+    .add_systems(Startup, init)
+    .add_systems(
+        PreUpdate,
+        (
+            exit_app.run_if(input_just_pressed(Binding::Quit)),
             (
-                exit_app.run_if(input_just_pressed(Binding::Quit)),
-                (
-                    update_editor_context.run_if(in_state(AppState::InEditor)),
-                    playtest,
-                )
-                    .chain()
-                    .run_if(input_just_pressed(Binding::Playtest)),
-                toggle_studio_light.run_if(input_just_pressed(KeyCode::KeyL)),
+                update_editor_context.run_if(in_state(AppState::InEditor)),
+                playtest,
             )
-                .after(InputBindingSystem),
-        );
+                .chain()
+                .run_if(input_just_pressed(Binding::Playtest)),
+            toggle_studio_light.run_if(input_just_pressed(KeyCode::KeyL)),
+        )
+            .after(InputBindingSystem),
+    );
 }
