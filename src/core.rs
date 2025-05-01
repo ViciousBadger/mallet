@@ -1,6 +1,7 @@
 pub mod binds;
 pub mod content;
 pub mod map;
+pub mod media;
 pub mod view;
 
 use bevy::{input::common_conditions::input_just_pressed, prelude::*};

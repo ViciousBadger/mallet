@@ -1,4 +1,3 @@
-pub mod assets;
 pub mod brush;
 pub mod light;
 
