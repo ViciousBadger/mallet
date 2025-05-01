@@ -470,7 +470,6 @@ fn reflect_map_changes_in_world(
             if let Some(last_node) = last_map.get_node(node_id) {
                 if node != last_node {
                     // Modify
-                    info!("mod {}", node_id);
                     let entity_id = *map_lookup
                         .node_to_entity(node_id)
                         .expect("Modified node should already be instantiated in world");
@@ -487,7 +486,6 @@ fn reflect_map_changes_in_world(
                     target_entity: entity_id,
                     node: node.clone(),
                 });
-                info!("add {}", entity_id);
             }
         }
 
@@ -499,7 +497,6 @@ fn reflect_map_changes_in_world(
             .collect();
 
         for entity in removed_node_entities {
-            info!("fuck off {}", entity);
             commands.entity(entity).despawn_recursive();
             map_lookup.remove_by_right(&entity);
         }

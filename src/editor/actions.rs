@@ -112,7 +112,6 @@ fn start_resizing_brush(
         brush: sel_target.focused,
         side: sel_target_brush_side.0,
     });
-    info!("resize brush!");
 }
 
 fn live_brush_resize(
