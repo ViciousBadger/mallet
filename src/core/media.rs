@@ -1,3 +1,4 @@
+pub mod surface;
 mod watch;
 
 use std::{
