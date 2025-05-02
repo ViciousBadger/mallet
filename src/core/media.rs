@@ -1,3 +1,5 @@
+mod watch;
+
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -6,8 +8,7 @@ use std::{
 use bevy::{
     asset::{io::AssetSourceId, AssetPath},
     image::{
-        ImageAddressMode, ImageFilterMode, ImageLoader, ImageLoaderSettings, ImageSampler,
-        ImageSamplerDescriptor,
+        ImageAddressMode, ImageLoader, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor,
     },
     prelude::*,
     utils::HashMap,
@@ -145,12 +146,6 @@ impl<C> MediaCollection<C> {
 //  - handle should not be serialized..
 // - Normals are a special kind of media tied to its Material (diffuse) by filename..?
 
-#[derive(Event, Deref, DerefMut)]
-pub struct MediaSync(MediaSrc);
-
-#[derive(Event, Deref, DerefMut)]
-pub struct MediaSave(MediaSrc);
-
 impl From<MediaSrc> for MediaSync {
     fn from(value: MediaSrc) -> Self {
         Self(value)
@@ -163,17 +158,42 @@ impl From<MediaSrc> for MediaSave {
     }
 }
 
-fn init_base_media(mut sources: ResMut<MediaSources>, mut sync_events: EventWriter<MediaSync>) {
+fn init_base_media(mut sources: ResMut<MediaSources>, mut commands: Commands) {
     sources.insert(
         MediaSrc::Base,
         MediaSrcConf::new(None, "base_content", "assets/base_content"),
     );
-    sync_events.send(MediaSrc::Base.into());
+    commands.trigger(MediaLoad(MediaSrc::Base));
 }
 
 #[derive(Deserialize)]
 pub struct LoadedMedia {
-    pub surfaces: Media<Surface>,
+    pub surfaces: Vec<(Id, Media<Surface>)>,
+}
+
+#[derive(Event, Deref, DerefMut)]
+pub struct MediaLoad(MediaSrc);
+
+fn media_load(
+    trigger: Trigger<MediaLoad>,
+    media_sources: Res<MediaSources>,
+    mut surfaces: ResMut<MediaCollection<Surface>>,
+    mut commands: Commands,
+) {
+    let src: MediaSrc = **trigger;
+    let src_conf = media_sources
+        .get(&src)
+        .expect("Synced source should be configured");
+
+    let path = src_conf.fs_base_path.join("media.db");
+    if path.exists() {
+        let bytes = std::fs::read(&path).unwrap();
+        let loaded: LoadedMedia = postcard::from_bytes(&bytes).unwrap();
+        surfaces.insert_from_storage(src, loaded.surfaces);
+        info!("loaded media collection from {:?}", path);
+        //let loaded = postcard::from_bytes
+    }
+    commands.trigger(MediaSync(src));
 }
 
 fn surface_image_settings(settings: &mut ImageLoaderSettings) {
@@ -189,61 +209,61 @@ fn surface_image_settings(settings: &mut ImageLoaderSettings) {
     }
 }
 
+#[derive(Event, Deref, DerefMut)]
+pub struct MediaSync(MediaSrc);
+
 fn media_sync(
+    trigger: Trigger<MediaSync>,
     asset_server: Res<AssetServer>,
     media_sources: Res<MediaSources>,
     mut id_gen: ResMut<IdGen>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     mut surfaces: ResMut<MediaCollection<Surface>>,
-    mut sync_events: EventReader<MediaSync>,
-    mut save_events: EventWriter<MediaSave>,
+    mut commands: Commands,
 ) {
-    for src_to_sync in sync_events.read().map(|event| &event.0).unique() {
-        let src_conf = media_sources
-            .get(src_to_sync)
-            .expect("Synced source should be configured");
+    let src: MediaSrc = **trigger;
+    let src_conf = media_sources
+        .get(&src)
+        .expect("Synced source should be configured");
 
-        let base_path = src_conf.fs_base_path.as_path();
-        for entry in WalkDir::new(base_path)
-            .into_iter()
-            .filter_map(|entry| entry.ok().filter(|entry| entry.file_type().is_file()))
-        {
-            let full_path = entry.path();
-            dbg!(full_path);
-            let media_path = entry.path().strip_prefix(base_path).unwrap();
-            dbg!(media_path);
-            let meta = MediaMeta {
-                path: media_path.to_path_buf(),
-                hash: blake3::hash(&std::fs::read(full_path).unwrap()),
-            };
-            let id = id_gen.generate();
-            if let Some(ext) = full_path.extension().and_then(|osstr| osstr.to_str()) {
-                if ImageLoader::SUPPORTED_FILE_EXTENSIONS.contains(&ext) {
-                    let mut surf = Surface::default();
-                    let std_mat = standard_materials.add(StandardMaterial {
-                        perceptual_roughness: surf.roughness,
-                        reflectance: surf.reflectance,
-                        base_color_texture: Some(asset_server.load_with_settings(
-                            src_conf.asset_path(media_path),
-                            surface_image_settings,
-                        )),
-                        ..default()
-                    });
-                    surf.handle = std_mat;
+    let base_path = src_conf.fs_base_path.as_path();
+    for entry in WalkDir::new(base_path)
+        .into_iter()
+        .filter_map(|entry| entry.ok().filter(|entry| entry.file_type().is_file()))
+    {
+        let full_path = entry.path();
+        let media_path = entry.path().strip_prefix(base_path).unwrap();
+        let meta = MediaMeta {
+            path: media_path.to_path_buf(),
+            hash: blake3::hash(&std::fs::read(full_path).unwrap()),
+        };
+        let id = id_gen.generate();
+        if let Some(ext) = full_path.extension().and_then(|osstr| osstr.to_str()) {
+            if ImageLoader::SUPPORTED_FILE_EXTENSIONS.contains(&ext) {
+                let mut surf = Surface::default();
+                let std_mat = standard_materials.add(StandardMaterial {
+                    perceptual_roughness: surf.roughness,
+                    reflectance: surf.reflectance,
+                    base_color_texture: Some(asset_server.load_with_settings(
+                        src_conf.asset_path(media_path),
+                        surface_image_settings,
+                    )),
+                    ..default()
+                });
+                surf.handle = std_mat;
 
-                    let media = Media {
-                        meta,
-                        content: surf,
-                    };
-                    dbg!(&media);
-                    surfaces.insert(id, *src_to_sync, media);
-                }
-            } else {
-                info!("{:?} has no file extension. Ignoring", full_path);
+                let media = Media {
+                    meta,
+                    content: surf,
+                };
+                dbg!(&media);
+                surfaces.insert(id, src, media);
             }
+        } else {
+            info!("{:?} has no file extension. Ignoring", full_path);
         }
-        save_events.send((*src_to_sync).into());
     }
+    commands.trigger(MediaSave(src));
 }
 
 #[derive(Serialize)]
@@ -251,32 +271,35 @@ pub struct StorableMedia<'a> {
     pub surfaces: Vec<(&'a Id, &'a Media<Surface>)>,
 }
 
+#[derive(Event, Deref, DerefMut)]
+pub struct MediaSave(MediaSrc);
+
 // NOTE: This only makes sense for base assets lol unless the map media should be its own file outside of map??? (maybe good idea)
 fn media_save(
+    trigger: Trigger<MediaSave>,
     media_sources: Res<MediaSources>,
     surfaces: Res<MediaCollection<Surface>>,
-    mut save_events: EventReader<MediaSave>,
 ) {
-    for src in save_events.read().map(|event| &event.0).unique() {
-        let src_conf = media_sources
-            .get(src)
-            .expect("Synced source should be configured");
+    let src: MediaSrc = **trigger;
+    let src_conf = media_sources
+        .get(&src)
+        .expect("Synced source should be configured");
 
-        let store = StorableMedia {
-            surfaces: surfaces.collect_for_storage(src),
-        };
-        let path = src_conf.fs_base_path.join("media.db");
-        info!("saving media collection to {:?}", path);
-        let file = File::create(path).unwrap();
-        postcard::to_io(&store, file).unwrap();
-    }
+    let store = StorableMedia {
+        surfaces: surfaces.collect_for_storage(&src),
+    };
+    let path = src_conf.fs_base_path.parent().unwrap().join("media.db");
+    info!("saving media collection to {:?}", path);
+    let file = File::create(path).unwrap();
+    postcard::to_io(&store, file).unwrap();
 }
 
 pub fn plugin(app: &mut App) {
+    app.add_plugins(watch::plugin);
     app.init_resource::<MediaSources>();
     app.init_resource::<MediaCollection<Surface>>();
-    app.add_event::<MediaSync>();
-    app.add_event::<MediaSave>();
+    app.add_observer(media_load);
+    app.add_observer(media_sync);
+    app.add_observer(media_save);
     app.add_systems(Startup, init_base_media);
-    app.add_systems(PreUpdate, (media_sync, media_save.after(media_sync)));
 }
