@@ -18,7 +18,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
-use crate::util::{Id, IdGen};
+use crate::{core::media::surface::Surface, util::{Id, IdGen}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MediaSrc {
@@ -71,24 +71,6 @@ pub struct Media<C> {
 pub struct MediaMeta {
     pub path: PathBuf,
     pub hash: blake3::Hash,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Surface {
-    pub roughness: f32,
-    pub reflectance: f32,
-    #[serde(skip)]
-    pub handle: Handle<StandardMaterial>,
-}
-
-impl Default for Surface {
-    fn default() -> Self {
-        Self {
-            roughness: 1.0,
-            reflectance: 0.0,
-            handle: default(),
-        }
-    }
 }
 
 pub struct SourcedMedia<C> {

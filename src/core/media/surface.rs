@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 // for different sets of media types...
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Surface {
+pub struct Surface {
     pub roughness: f32,
     pub reflectance: f32,
     #[serde(skip)]
