@@ -28,6 +28,11 @@ use crate::{
     util::{Id, IdGen},
 };
 
+// TODO:
+// Split graph into MapHistory, and extract mapnodes to be only components
+// But let the map node "kind" be a generic variant when on the component
+// translate between the "enum" layout (best for storage) and "generic" layout (best for system queries)
+
 #[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct Map {
     state: BTreeMap<Id, MapNode>,

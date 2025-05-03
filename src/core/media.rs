@@ -61,10 +61,12 @@ impl MediaSrcConf {
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct MediaSources(HashMap<MediaSrc, MediaSrcConf>);
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Media<C> {
-    pub meta: MediaMeta,
-    pub content: C,
+// TODO: Like with mapnodes, media can be in generic form
+// when saved in a resource and in an enum form when stored.
+// (maybe dumb?)
+//
+pub trait Media {
+    fn as_ref_kind<'a>(&'a self) -> MediaRefKind<'a>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -73,32 +75,70 @@ pub struct MediaMeta {
     pub hash: blake3::Hash,
 }
 
-pub struct SourcedMedia<C> {
+impl MediaMeta {
+    pub fn same_but_moved_or_modified(&self, other: &MediaMeta) -> bool {
+        self.path == other.path || self.hash == other.hash
+    }
+}
+
+pub struct LiveMedia<M: Media> {
     pub source: MediaSrc,
-    pub media: Media<C>,
+    pub meta: MediaMeta,
+    pub media: M,
+}
+
+#[derive(Serialize)]
+pub struct SavableMediaLib<'a>(Vec<MediaRef<'a>>);
+
+#[derive(Debug, Serialize)]
+pub struct MediaRef<'a> {
+    id: &'a Id,
+    meta: &'a MediaMeta,
+    kind: MediaRefKind<'a>,
+}
+
+#[derive(Debug, Serialize)]
+pub enum MediaRefKind<'a> {
+    Surface(&'a Surface),
+}
+
+
+#[derive(Deserialize)]
+pub struct LoadedMediaLib(Vec<LoadedMedia>);
+
+#[derive(Debug, Deserialize)]
+pub struct LoadedMedia {
+    id: Id,
+    meta: MediaMeta,
+    kind: LoadedMediaKind,
+}
+
+#[derive(Debug, Deserialize)]
+pub enum LoadedMediaKind {
+    Surface(Surface),
 }
 
 #[derive(Resource)]
-pub struct MediaCollection<C>(HashMap<Id, SourcedMedia<C>>);
+pub struct MediaCollection<M: Media>(HashMap<Id, LiveMedia<M>>);
 
 // This is nice, but since the collections are separate types there is some boilerplate when e.g. purging.
-impl<C> Default for MediaCollection<C> {
+impl<M: Media> Default for MediaCollection<M> {
     fn default() -> Self {
         MediaCollection(HashMap::new())
     }
 }
 
-impl<C> MediaCollection<C> {
-    pub fn get(&self, id: &Id) -> Option<&Media<C>> {
+impl<M: Media> MediaCollection<M> {
+    pub fn get(&self, id: &Id) -> Option<&M> {
         self.0.get(id).map(|sourced| &sourced.media)
     }
 
-    pub fn get_mut(&mut self, id: &Id) -> Option<&mut Media<C>> {
+    pub fn get_mut(&mut self, id: &Id) -> Option<&mut M> {
         self.0.get_mut(id).map(|sourced| &mut sourced.media)
     }
 
-    pub fn insert(&mut self, id: Id, source: MediaSrc, media: Media<C>) {
-        self.0.insert(id, SourcedMedia { source, media });
+    pub fn insert(&mut self, id: Id, source: MediaSrc, meta: MediaMeta, media: M) {
+        self.0.insert(id, LiveMedia { source, meta, media });
     }
 
     pub fn remove(&mut self, id: &Id) {
@@ -109,18 +149,15 @@ impl<C> MediaCollection<C> {
         self.0.retain(|_, sm| &sm.source != source);
     }
 
-    pub fn collect_for_storage<'a>(&'a self, source: &MediaSrc) -> Vec<(&'a Id, &'a Media<C>)> {
+    pub fn collect_for_storage<'a>(&'a self, source: &'a MediaSrc) -> impl Iterator<Item = MediaRef<'a>>   {
         self.0
             .iter()
-            .filter(|(_, sourced)| &sourced.source == source)
-            .map(|(id, sourced_media)| (id, &sourced_media.media))
-            .collect_vec()
-    }
-
-    pub fn insert_from_storage(&mut self, source: MediaSrc, to_insert: Vec<(Id, Media<C>)>) {
-        for (id, media) in to_insert {
-            self.insert(id, source, media);
-        }
+            .filter(move |(_, sourced)| &sourced.source == source)
+            .map(|(id, live)| MediaRef {
+                id,
+                meta: &live.meta,
+                kind: live.media.as_ref_kind(),
+            })
     }
 }
 
@@ -149,11 +186,6 @@ fn init_base_media(mut sources: ResMut<MediaSources>, mut commands: Commands) {
     commands.trigger(MediaLoad(MediaSrc::Base));
 }
 
-#[derive(Deserialize)]
-pub struct LoadedMedia {
-    pub surfaces: Vec<(Id, Media<Surface>)>,
-}
-
 #[derive(Event, Deref, DerefMut)]
 pub struct MediaLoad(MediaSrc);
 
@@ -168,13 +200,20 @@ fn media_load(
         .get(&src)
         .expect("Synced source should be configured");
 
-    let path = src_conf.fs_base_path.join("media.db");
+    let path = src_conf.fs_base_path.parent().unwrap().join("media.db");
     if path.exists() {
         let bytes = std::fs::read(&path).unwrap();
-        let loaded: LoadedMedia = postcard::from_bytes(&bytes).unwrap();
-        surfaces.insert_from_storage(src, loaded.surfaces);
+        let loaded: LoadedMediaLib = postcard::from_bytes(&bytes).unwrap();
+        for LoadedMedia {id, meta, kind} in loaded.0 {
+            match kind {
+                LoadedMediaKind::Surface(surface) => surfaces.insert(id, src, meta, surface),
+            }
+        }
+        // surfaces.insert_from_storage(src, loaded.surfaces);
         info!("loaded media collection from {:?}", path);
         //let loaded = postcard::from_bytes
+    } else {
+        info!("no media collection at {:?}", path);
     }
     commands.trigger(MediaSync(src));
 }
@@ -235,12 +274,12 @@ fn media_sync(
                 });
                 surf.handle = std_mat;
 
-                let media = Media {
-                    meta,
-                    content: surf,
-                };
-                dbg!(&media);
-                surfaces.insert(id, src, media);
+                // let media = Media {
+                //     meta,
+                //     content: surf,
+                // };
+                // dbg!(&media);
+                surfaces.insert(id, src, meta, surf);
             }
         } else {
             info!("{:?} has no file extension. Ignoring", full_path);
@@ -249,10 +288,10 @@ fn media_sync(
     commands.trigger(MediaSave(src));
 }
 
-#[derive(Serialize)]
-pub struct StorableMedia<'a> {
-    pub surfaces: Vec<(&'a Id, &'a Media<Surface>)>,
-}
+// #[derive(Serialize)]
+// pub struct StorableMedia<'a> {
+//     pub surfaces: Vec<(&'a Id, &'a Media<Surface>)>,
+// }
 
 #[derive(Event, Deref, DerefMut)]
 pub struct MediaSave(MediaSrc);
@@ -268,13 +307,15 @@ fn media_save(
         .get(&src)
         .expect("Synced source should be configured");
 
-    let store = StorableMedia {
-        surfaces: surfaces.collect_for_storage(&src),
-    };
+    // NOTE: can't be async atm because of the bororw.
+    let lib = SavableMediaLib(
+        surfaces.collect_for_storage(&src).collect_vec()
+    );
+
     let path = src_conf.fs_base_path.parent().unwrap().join("media.db");
     info!("saving media collection to {:?}", path);
     let file = File::create(path).unwrap();
-    postcard::to_io(&store, file).unwrap();
+    postcard::to_io(&lib, file).unwrap();
 }
 
 pub fn plugin(app: &mut App) {
