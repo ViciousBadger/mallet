@@ -22,7 +22,7 @@ notify = "8.0.0"
 petgraph = { version = "0.8.1", features = ["serde-1", "serde_derive"] }
 postcard = { version = "1.1.1", features = ["use-std"] }
 rand = "0.9.1"
-ron = "0.10.1"
+ron = { version = "0.10.1", features = ["integer128"] }
 serde = { version = "1.0.219", features = ["derive"] }
 strum = "0.27.1"
 thiserror = "2.0.12"

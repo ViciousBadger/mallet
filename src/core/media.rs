@@ -3,6 +3,7 @@ mod watch;
 
 use std::{
     fs::File,
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -15,6 +16,7 @@ use bevy::{
     utils::HashMap,
 };
 use itertools::Itertools;
+use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
@@ -72,14 +74,14 @@ pub trait Media {
     fn as_ref_kind(&self) -> MediaRefKind;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaMeta {
     pub path: PathBuf,
     pub hash: blake3::Hash,
 }
 
 impl MediaMeta {
-    pub fn same_but_moved_or_modified(&self, other: &MediaMeta) -> bool {
+    pub fn mod_eq(&self, other: &MediaMeta) -> bool {
         self.path == other.path || self.hash == other.hash
     }
 }
@@ -215,15 +217,14 @@ fn media_load(
     let path = src_conf.fs_base_path.parent().unwrap().join("media.db");
     if path.exists() {
         let bytes = std::fs::read(&path).unwrap();
-        let loaded: LoadedMediaLib = postcard::from_bytes(&bytes).unwrap();
+        //let loaded: LoadedMediaLib = postcard::from_bytes(&bytes).unwrap();
+        let loaded: LoadedMediaLib = ron::de::from_bytes(&bytes).unwrap();
         for LoadedMedia { id, meta, kind } in loaded.0 {
             match kind {
                 LoadedMediaKind::Surface(surface) => surfaces.insert(id, src, meta, surface),
             }
         }
-        // surfaces.insert_from_storage(src, loaded.surfaces);
         info!("loaded media collection from {:?}", path);
-        //let loaded = postcard::from_bytes
     } else {
         info!("no media collection at {:?}", path);
     }
@@ -271,27 +272,47 @@ fn media_sync(
             path: media_path.to_path_buf(),
             hash: blake3::hash(&std::fs::read(full_path).unwrap()),
         };
-        let id = id_gen.generate();
         if let Some(ext) = full_path.extension().and_then(|osstr| osstr.to_str()) {
             if ImageLoader::SUPPORTED_FILE_EXTENSIONS.contains(&ext) {
-                let mut surf = Surface::default();
-                let std_mat = standard_materials.add(StandardMaterial {
-                    perceptual_roughness: surf.roughness,
-                    reflectance: surf.reflectance,
-                    base_color_texture: Some(asset_server.load_with_settings(
-                        src_conf.asset_path(media_path),
-                        surface_image_settings,
-                    )),
-                    ..default()
-                });
-                surf.handle = std_mat;
+                // TODO: can't generalize among media types like this.
+                //
+                let identical_found = surfaces.0.values().any(|media| media.meta == meta);
+                if identical_found {
+                    info!("unchanged: {:?}", media_path);
+                } else {
+                    // TODO: This breaks when duplicating a file, the hash will match and the file
+                    // will be seen as moved.
+                    let move_or_modify_found = surfaces
+                        .0
+                        .iter()
+                        .find(|(_, media)| media.meta.mod_eq(&meta))
+                        .map(|(id, _)| *id);
 
-                // let media = Media {
-                //     meta,
-                //     content: surf,
-                // };
-                // dbg!(&media);
-                surfaces.insert(id, src, meta, surf);
+                    if let Some(existing_id) = move_or_modify_found {
+                        info!(
+                            "moved or modified: {:?}, existing id {}",
+                            media_path, existing_id
+                        );
+                    } else {
+                        info!("newly added: {:?}", media_path);
+                    }
+
+                    let id = move_or_modify_found.unwrap_or_else(|| id_gen.generate());
+
+                    let mut surf = Surface::default();
+                    let std_mat = standard_materials.add(StandardMaterial {
+                        perceptual_roughness: surf.roughness,
+                        reflectance: surf.reflectance,
+                        base_color_texture: Some(asset_server.load_with_settings(
+                            src_conf.asset_path(media_path),
+                            surface_image_settings,
+                        )),
+                        ..default()
+                    });
+                    surf.handle = std_mat;
+
+                    surfaces.insert(id, src, meta, surf);
+                }
             }
         } else {
             info!("{:?} has no file extension. Ignoring", full_path);
@@ -324,8 +345,14 @@ fn media_save(
 
     let path = src_conf.fs_base_path.parent().unwrap().join("media.db");
     info!("saving media collection to {:?}", path);
-    let file = File::create(path).unwrap();
-    postcard::to_io(&lib, file).unwrap();
+    let mut file = File::create(path).unwrap();
+    //postcard::to_io(&lib, file).unwrap();
+    file.write_all(
+        ron::ser::to_string_pretty(&lib, PrettyConfig::default())
+            .unwrap()
+            .as_bytes(),
+    )
+    .unwrap();
 }
 
 pub fn plugin(app: &mut App) {
