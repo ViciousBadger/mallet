@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::core::media::{Media, MediaRef, MediaRefKind};
+use crate::core::media::{Media, MediaRefKind};
 
 // Idea: put Surface stuff here and use dependency injection
 // to have the Surfaces collection only exist when the plugin is loaded.
@@ -27,7 +27,7 @@ impl Default for Surface {
 }
 
 impl Media for Surface {
-    fn as_ref_kind<'a>(&'a self) -> MediaRefKind<'a> {
+    fn as_ref_kind(&self) -> MediaRefKind {
         MediaRefKind::Surface(self)
     }
 }

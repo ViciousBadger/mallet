@@ -1,9 +1,4 @@
-use bevy::{
-    color::palettes::css,
-    prelude::*,
-    ui::{BackgroundColor, RelativeCursorPosition},
-    utils::HashSet,
-};
+use bevy::{color::palettes::css, prelude::*, ui::BackgroundColor, utils::HashSet};
 
 use crate::core::AppState;
 

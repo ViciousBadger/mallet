@@ -18,7 +18,10 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
-use crate::{core::media::surface::Surface, util::{Id, IdGen}};
+use crate::{
+    core::media::surface::Surface,
+    util::{Id, IdGen},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MediaSrc {
@@ -66,7 +69,7 @@ pub struct MediaSources(HashMap<MediaSrc, MediaSrcConf>);
 // (maybe dumb?)
 //
 pub trait Media {
-    fn as_ref_kind<'a>(&'a self) -> MediaRefKind<'a>;
+    fn as_ref_kind(&self) -> MediaRefKind;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,7 +104,6 @@ pub struct MediaRef<'a> {
 pub enum MediaRefKind<'a> {
     Surface(&'a Surface),
 }
-
 
 #[derive(Deserialize)]
 pub struct LoadedMediaLib(Vec<LoadedMedia>);
@@ -138,7 +140,14 @@ impl<M: Media> MediaCollection<M> {
     }
 
     pub fn insert(&mut self, id: Id, source: MediaSrc, meta: MediaMeta, media: M) {
-        self.0.insert(id, LiveMedia { source, meta, media });
+        self.0.insert(
+            id,
+            LiveMedia {
+                source,
+                meta,
+                media,
+            },
+        );
     }
 
     pub fn remove(&mut self, id: &Id) {
@@ -149,7 +158,10 @@ impl<M: Media> MediaCollection<M> {
         self.0.retain(|_, sm| &sm.source != source);
     }
 
-    pub fn collect_for_storage<'a>(&'a self, source: &'a MediaSrc) -> impl Iterator<Item = MediaRef<'a>>   {
+    pub fn collect_for_storage<'a>(
+        &'a self,
+        source: &'a MediaSrc,
+    ) -> impl Iterator<Item = MediaRef<'a>> {
         self.0
             .iter()
             .filter(move |(_, sourced)| &sourced.source == source)
@@ -204,7 +216,7 @@ fn media_load(
     if path.exists() {
         let bytes = std::fs::read(&path).unwrap();
         let loaded: LoadedMediaLib = postcard::from_bytes(&bytes).unwrap();
-        for LoadedMedia {id, meta, kind} in loaded.0 {
+        for LoadedMedia { id, meta, kind } in loaded.0 {
             match kind {
                 LoadedMediaKind::Surface(surface) => surfaces.insert(id, src, meta, surface),
             }
@@ -308,9 +320,7 @@ fn media_save(
         .expect("Synced source should be configured");
 
     // NOTE: can't be async atm because of the bororw.
-    let lib = SavableMediaLib(
-        surfaces.collect_for_storage(&src).collect_vec()
-    );
+    let lib = SavableMediaLib(surfaces.collect_for_storage(&src).collect_vec());
 
     let path = src_conf.fs_base_path.parent().unwrap().join("media.db");
     info!("saving media collection to {:?}", path);

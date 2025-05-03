@@ -27,3 +27,7 @@ Cargo.lock
 
 /.envrc
 /.direnv
+
+
+# Should probably be removed at some point?
+/assets/media.db
