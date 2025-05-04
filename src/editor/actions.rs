@@ -10,14 +10,14 @@ use crate::{
         map::{
             brush::{Brush, BrushBounds},
             light::{Light, LightType},
-            DeployMapNode, LiveMapNodeId, MapNodeMeta,
+            LiveMapNodeId, MapDelta, MapDeltaPush, TypedMapNode,
         },
     },
     editor::{
         selection::{SelTargetBrushSide, SelectedPos, SelectionTargets},
         EditorSystems,
     },
-    util::Facing3d,
+    util::{Facing3d, IdGen},
 };
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
@@ -61,7 +61,10 @@ fn end_building_brush_here(
     process: Res<BuildBrushProcess>,
     sel_pos: Res<SelectedPos>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
+    mut map_deltas: EventWriter<MapDeltaPush>,
+    mut id_gen: ResMut<IdGen>,
     // mut map_changes: EventWriter<MapChange>,
+    //
 ) {
     let start = process.start;
     let end = **sel_pos;
@@ -69,10 +72,18 @@ fn end_building_brush_here(
 
     // TODO: Send a map delta instead
 
-    // if bounds.is_valid() {
-    //     map_changes.send(MapChange::Add(MapNode::Brush(Brush { bounds })));
-    //     next_editor_action.set(EditorAction::None);
-    // }
+    if bounds.is_valid() {
+        //map_changes.send(MapChange::Add(MapNode::Brush(Brush { bounds })));
+        map_deltas.send(
+            MapDelta::AddNode {
+                id: id_gen.generate(),
+                name: "".to_owned(),
+                node: TypedMapNode::Brush(Brush { bounds }),
+            }
+            .into(),
+        );
+        next_editor_action.set(EditorAction::None);
+    }
 }
 
 fn build_brush_draw_gizmos(

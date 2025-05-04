@@ -19,7 +19,7 @@ use itertools::Itertools;
 use light::Light;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs::File, io::Write, path::PathBuf};
-use strum::EnumDiscriminants;
+use strum::{EnumDiscriminants, IntoDiscriminant};
 
 use crate::{
     app_data::AppDataPath,
@@ -89,7 +89,7 @@ pub struct LiveMapNodeId {
 #[derive(Component, Debug, Clone, Serialize, Deserialize)]
 pub struct MapNodeMeta {
     pub id: Id,
-    pub name: Option<String>,
+    pub name: String,
     pub node_type: MapNodeType,
 }
 
@@ -99,6 +99,16 @@ pub struct MapNodeMeta {
 pub enum TypedMapNode {
     Brush(Brush),
     Light(Light),
+}
+
+impl TypedMapNode {
+    // pub fn component(&self) -> impl Component {
+    //     todo!();
+    //     // match self {
+    //     //     TypedMapNode::Brush(brush) => brush.clone(),
+    //     //     TypedMapNode::Light(light) => light.clone(),
+    //     // }
+    // }
 }
 
 // Represents a proposed change to the map.
@@ -113,7 +123,7 @@ pub enum TypedMapNode {
 /// MapNode can be different from the one stored in the Map, to make temporary node changes in the editor.
 #[derive(Event)]
 pub struct DeployMapNode<T> {
-    pub target_entity: Entity,
+    pub entity: Entity,
     pub node: T,
 }
 
@@ -310,15 +320,6 @@ impl MapDelta {
     }
 }
 
-// impl MapNode {
-//     pub fn name(&self) -> &'static str {
-//         match self {
-//             MapNode::Brush(..) => "Brush",
-//             MapNode::Light(..) => "Light",
-//         }
-//     }
-// }
-
 #[derive(Resource)]
 struct LoadingMap {
     path: PathBuf,
@@ -506,7 +507,7 @@ fn load_map_assets(
 
 pub fn undo_map_change(
     mut history: ResMut<MapHistory>,
-    mut delta_events: EventWriter<MapDeltaApply>,
+    mut delta_apply: EventWriter<MapDeltaApply>,
 ) {
     if history.can_undo() {
         history.undo();
@@ -518,7 +519,7 @@ pub fn undo_map_change(
 
 pub fn redo_map_change(
     mut history: ResMut<MapHistory>,
-    mut delta_events: EventWriter<MapDeltaApply>,
+    mut delta_apply: EventWriter<MapDeltaApply>,
 ) {
     if history.can_redo() {
         history.redo();
@@ -588,12 +589,67 @@ pub fn redo_map_change(
 //     *last_map = Some(map.clone());
 // }
 
-#[derive(Event)]
+/// Push map changes into the map history.
+#[derive(Event, Clone)]
+pub struct MapDeltaPush(Vec<MapDelta>);
+
+impl From<MapDelta> for MapDeltaPush {
+    fn from(value: MapDelta) -> Self {
+        Self(vec![value])
+    }
+}
+
+impl From<Vec<MapDelta>> for MapDeltaPush {
+    fn from(value: Vec<MapDelta>) -> Self {
+        Self(value)
+    }
+}
+
+/// Apply map changes to the world.
+#[derive(Event, Clone)]
 pub struct MapDeltaApply(Vec<MapDelta>);
 
-fn apply_deltas(mut delta_events: EventReader<MapDeltaApply>, mut commands: Commands) {
+fn push_deltas(
+    mut delta_events: EventReader<MapDeltaPush>,
+    mut delta_apply: EventWriter<MapDeltaApply>,
+    mut history: ResMut<MapHistory>,
+) {
+    for pushed_deltas in delta_events.read() {
+        for delta in &pushed_deltas.0 {
+            info!("push: {:?}", delta);
+            history.push(delta.clone());
+        }
+        delta_apply.send(MapDeltaApply(pushed_deltas.0.clone()));
+    }
+    // TODO: This should work kinda like "reflect_changes_in_world" above.
+}
+
+fn apply_deltas(
+    lookup: Res<MapLookup>,
+    mut delta_events: EventReader<MapDeltaApply>,
+    mut deploy_brush_evs: EventWriter<DeployMapNode<Brush>>,
+    mut q_nodes: Query<&mut MapNodeMeta>,
+    mut commands: Commands,
+) {
     for delta in delta_events.read().flat_map(|ev| ev.0.iter()) {
-        info!("{:?}", delta);
+        match delta {
+            MapDelta::Nop => (),
+            MapDelta::AddNode { id, name, node } => {
+                commands.spawn(MapNodeMeta {
+                    id: *id,
+                    name: name.clone(),
+                    node_type: node.discriminant(),
+                });
+            }
+            MapDelta::ModifyNode { id, before, after } => {
+                let e = lookup.node_to_entity(id).unwrap();
+                //commands.entity(e).insert(after)
+            }
+            MapDelta::RenameNode { id, before, after } => {}
+            MapDelta::RemoveNode { id, name, node } => {}
+        }
+
+        info!("apply: {:?}", delta);
     }
     // TODO: This should work kinda like "reflect_changes_in_world" above.
 }
@@ -659,6 +715,7 @@ fn apply_deltas(mut delta_events: EventReader<MapDeltaApply>, mut commands: Comm
 
 pub fn plugin(app: &mut App) {
     //app.add_event::<DeployMapNode>();
+    app.add_event::<MapDeltaPush>();
     app.add_event::<MapDeltaApply>();
     app.init_resource::<MapLookup>();
     app.add_systems(Startup, (init_empty_map, start_loading_map));
@@ -683,6 +740,8 @@ pub fn plugin(app: &mut App) {
                 .chain()
                 .run_if(resource_exists::<MapSession>.and(on_event::<AppExit>)),
             insert_map_when_loaded.run_if(resource_exists::<LoadingMap>),
+            push_deltas,
+            apply_deltas.after(push_deltas),
             // apply_changes_to_map.run_if(resource_exists::<Map>),
             // reflect_map_changes_in_world.run_if(resource_exists_and_changed::<Map>),
             // deploy_nodes
