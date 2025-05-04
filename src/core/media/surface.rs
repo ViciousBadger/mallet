@@ -1,7 +1,10 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::core::media::{Media, MediaRefKind};
+// TODO: Good way of handling e.g. textures for normals.
+// - Combine hash of diffuse and normal and have an optional asset handle..?
+//  - handle should not be serialized..
+// - Normals are a special kind of media tied to its Material (diffuse) by filename..?
 
 // Idea: put Surface stuff here and use dependency injection
 // to have the Surfaces collection only exist when the plugin is loaded.
@@ -23,11 +26,5 @@ impl Default for Surface {
             reflectance: 0.0,
             handle: default(),
         }
-    }
-}
-
-impl Media for Surface {
-    fn as_ref_kind(&self) -> MediaRefKind {
-        MediaRefKind::Surface(self)
     }
 }

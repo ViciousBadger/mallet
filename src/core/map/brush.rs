@@ -8,7 +8,10 @@ use bevy::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::util::Facing3d;
+use crate::{
+    core::map::{DeployMapNode, MapAssets, MapNode},
+    util::{Facing3d, Id},
+};
 
 #[derive(Component, Serialize, Deserialize, Clone, PartialEq)]
 #[require(Visibility, Transform)]
@@ -158,5 +161,22 @@ impl MeshBuilder for BrushSideMeshBuilder {
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    }
+}
+
+pub fn deploy_brushes(
+    map_assets: Res<MapAssets>,
+    q_brushes: Query<(&Id, &Brush)>,
+    mut deploy_events: EventReader<DeployMapNode>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    // TODO: insert the "inner" component of the mapnode before deploy
+    // (source of truth = component) ??!???!?! confuse
+    for event in deploy_events.read() {
+        if let Ok((id, brush)) = q_brushes.get(event.target_entity) {
+            info!("yee");
+        }
+        //if let MapNode::Brush(brush) = &event.node {}
     }
 }

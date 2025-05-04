@@ -1,3 +1,4 @@
+mod dto;
 pub mod surface;
 mod watch;
 
@@ -16,12 +17,14 @@ use bevy::{
     utils::HashMap,
 };
 use itertools::Itertools;
-use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 use crate::{
-    core::media::surface::Surface,
+    core::media::{
+        dto::{MediaDe, MediaLibDe, MediaLibSer, MediaSer},
+        surface::Surface,
+    },
     util::{Id, IdGen},
 };
 
@@ -66,14 +69,6 @@ impl MediaSrcConf {
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct MediaSources(HashMap<MediaSrc, MediaSrcConf>);
 
-// TODO: Like with mapnodes, media can be in generic form
-// when saved in a resource and in an enum form when stored.
-// (maybe dumb?)
-//
-pub trait Media {
-    fn as_ref_kind(&self) -> MediaRefKind;
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaMeta {
     pub path: PathBuf,
@@ -86,68 +81,38 @@ impl MediaMeta {
     }
 }
 
-pub struct LiveMedia<M: Media> {
+pub struct Media<T> {
     pub source: MediaSrc,
     pub meta: MediaMeta,
-    pub media: M,
-}
-
-#[derive(Serialize)]
-pub struct SavableMediaLib<'a>(Vec<MediaRef<'a>>);
-
-#[derive(Debug, Serialize)]
-pub struct MediaRef<'a> {
-    id: &'a Id,
-    meta: &'a MediaMeta,
-    kind: MediaRefKind<'a>,
-}
-
-#[derive(Debug, Serialize)]
-pub enum MediaRefKind<'a> {
-    Surface(&'a Surface),
-}
-
-#[derive(Deserialize)]
-pub struct LoadedMediaLib(Vec<LoadedMedia>);
-
-#[derive(Debug, Deserialize)]
-pub struct LoadedMedia {
-    id: Id,
-    meta: MediaMeta,
-    kind: LoadedMediaKind,
-}
-
-#[derive(Debug, Deserialize)]
-pub enum LoadedMediaKind {
-    Surface(Surface),
+    pub content: T,
 }
 
 #[derive(Resource)]
-pub struct MediaCollection<M: Media>(HashMap<Id, LiveMedia<M>>);
+pub struct MediaCollection<T>(HashMap<Id, Media<T>>);
 
 // This is nice, but since the collections are separate types there is some boilerplate when e.g. purging.
-impl<M: Media> Default for MediaCollection<M> {
+impl<T> Default for MediaCollection<T> {
     fn default() -> Self {
         MediaCollection(HashMap::new())
     }
 }
 
-impl<M: Media> MediaCollection<M> {
-    pub fn get(&self, id: &Id) -> Option<&M> {
-        self.0.get(id).map(|sourced| &sourced.media)
+impl<T> MediaCollection<T> {
+    pub fn get(&self, id: &Id) -> Option<&T> {
+        self.0.get(id).map(|sourced| &sourced.content)
     }
 
-    pub fn get_mut(&mut self, id: &Id) -> Option<&mut M> {
-        self.0.get_mut(id).map(|sourced| &mut sourced.media)
+    pub fn get_mut(&mut self, id: &Id) -> Option<&mut T> {
+        self.0.get_mut(id).map(|sourced| &mut sourced.content)
     }
 
-    pub fn insert(&mut self, id: Id, source: MediaSrc, meta: MediaMeta, media: M) {
+    pub fn insert(&mut self, id: Id, source: MediaSrc, meta: MediaMeta, media: T) {
         self.0.insert(
             id,
-            LiveMedia {
+            Media {
                 source,
                 meta,
-                media,
+                content: media,
             },
         );
     }
@@ -158,37 +123,6 @@ impl<M: Media> MediaCollection<M> {
 
     pub fn purge_source(&mut self, source: &MediaSrc) {
         self.0.retain(|_, sm| &sm.source != source);
-    }
-
-    pub fn collect_for_storage<'a>(
-        &'a self,
-        source: &'a MediaSrc,
-    ) -> impl Iterator<Item = MediaRef<'a>> {
-        self.0
-            .iter()
-            .filter(move |(_, sourced)| &sourced.source == source)
-            .map(|(id, live)| MediaRef {
-                id,
-                meta: &live.meta,
-                kind: live.media.as_ref_kind(),
-            })
-    }
-}
-
-// TODO: Good way of handling e.g. textures for normals.
-// - Combine hash of diffuse and normal and have an optional asset handle..?
-//  - handle should not be serialized..
-// - Normals are a special kind of media tied to its Material (diffuse) by filename..?
-
-impl From<MediaSrc> for MediaSync {
-    fn from(value: MediaSrc) -> Self {
-        Self(value)
-    }
-}
-
-impl From<MediaSrc> for MediaSave {
-    fn from(value: MediaSrc) -> Self {
-        Self(value)
     }
 }
 
@@ -216,14 +150,11 @@ fn media_load(
 
     let path = src_conf.fs_base_path.parent().unwrap().join("media.db");
     if path.exists() {
-        let bytes = std::fs::read(&path).unwrap();
-        //let loaded: LoadedMediaLib = postcard::from_bytes(&bytes).unwrap();
-        let loaded: LoadedMediaLib = ron::de::from_bytes(&bytes).unwrap();
-        for LoadedMedia { id, meta, kind } in loaded.0 {
-            match kind {
-                LoadedMediaKind::Surface(surface) => surfaces.insert(id, src, meta, surface),
-            }
-        }
+        let bytes = std::fs::read(&path).expect("File read fail");
+        let dto = MediaLibDe::from_bytes(&bytes).expect("Deserialization fail");
+
+        surfaces.insert_from_dto_vec(&src, dto.surfaces);
+
         info!("loaded media collection from {:?}", path);
     } else {
         info!("no media collection at {:?}", path);
@@ -321,15 +252,9 @@ fn media_sync(
     commands.trigger(MediaSave(src));
 }
 
-// #[derive(Serialize)]
-// pub struct StorableMedia<'a> {
-//     pub surfaces: Vec<(&'a Id, &'a Media<Surface>)>,
-// }
-
 #[derive(Event, Deref, DerefMut)]
 pub struct MediaSave(MediaSrc);
 
-// NOTE: This only makes sense for base assets lol unless the map media should be its own file outside of map??? (maybe good idea)
 fn media_save(
     trigger: Trigger<MediaSave>,
     media_sources: Res<MediaSources>,
@@ -341,18 +266,17 @@ fn media_save(
         .expect("Synced source should be configured");
 
     // NOTE: can't be async atm because of the bororw.
-    let lib = SavableMediaLib(surfaces.collect_for_storage(&src).collect_vec());
+    // Fortunately, serialization is fast.
+    let dto = MediaLibSer {
+        surfaces: surfaces.collect_dto_vec(&src),
+    };
+    let bytes = dto.to_bytes().expect("Serialization fail");
 
     let path = src_conf.fs_base_path.parent().unwrap().join("media.db");
     info!("saving media collection to {:?}", path);
-    let mut file = File::create(path).unwrap();
+    let mut file = File::create(path).expect("File creation fail");
     //postcard::to_io(&lib, file).unwrap();
-    file.write_all(
-        ron::ser::to_string_pretty(&lib, PrettyConfig::default())
-            .unwrap()
-            .as_bytes(),
-    )
-    .unwrap();
+    file.write_all(&bytes).expect("File write fail");
 }
 
 pub fn plugin(app: &mut App) {
