@@ -205,8 +205,9 @@ fn media_sync(
         };
         if let Some(ext) = full_path.extension().and_then(|osstr| osstr.to_str()) {
             if ImageLoader::SUPPORTED_FILE_EXTENSIONS.contains(&ext) {
-                // TODO: can't generalize among media types like this.
+                // TODO: can't generalize among media types like this..
                 //
+                info!("now checking: {:?}", media_path);
                 let identical_found = surfaces.0.values().any(|media| media.meta == meta);
                 if identical_found {
                     info!("unchanged: {:?}", media_path);
@@ -220,10 +221,16 @@ fn media_sync(
                         .map(|(id, _)| *id);
 
                     if let Some(existing_id) = move_or_modify_found {
+                        let already_has_hash = surfaces.0.values().any(|media| {
+                            media.meta.hash == meta.hash && media.meta.path != meta.path
+                        });
                         info!(
                             "moved or modified: {:?}, existing id {}",
                             media_path, existing_id
                         );
+                        if already_has_hash {
+                            info!("IDENTICAL HASH ALSO FOUND W DIFF PATH ..");
+                        }
                     } else {
                         info!("newly added: {:?}", media_path);
                     }
