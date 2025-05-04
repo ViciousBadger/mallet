@@ -9,11 +9,11 @@ use bevy::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::map::{DeployMapNode, MapAssets, MapNode},
+    core::map::{DeployMapNode, MapAssets, MapNodeMeta},
     util::{Facing3d, Id},
 };
 
-#[derive(Component, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[require(Visibility, Transform)]
 pub struct Brush {
     pub bounds: BrushBounds,
@@ -166,17 +166,19 @@ impl MeshBuilder for BrushSideMeshBuilder {
 
 pub fn deploy_brushes(
     map_assets: Res<MapAssets>,
-    q_brushes: Query<(&Id, &Brush)>,
-    mut deploy_events: EventReader<DeployMapNode>,
+    q_brushes: Query<(&MapNodeMeta, &Brush)>,
+    mut deploy_events: EventReader<DeployMapNode<Brush>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    // TODO: insert the "inner" component of the mapnode before deploy
-    // (source of truth = component) ??!???!?! confuse
     for event in deploy_events.read() {
         if let Ok((id, brush)) = q_brushes.get(event.target_entity) {
             info!("yee");
         }
         //if let MapNode::Brush(brush) = &event.node {}
     }
+}
+
+pub fn plugin(app: &mut App) {
+    app.add_systems(PreUpdate, deploy_brushes);
 }

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod app_data;
 mod core;
 mod editor;
