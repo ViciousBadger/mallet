@@ -1,4 +1,5 @@
 pub mod brush;
+mod dto;
 pub mod light;
 
 use avian3d::prelude::{Collider, RigidBody};
@@ -16,26 +17,18 @@ use brush::Brush;
 use daggy::{Dag, NodeIndex, Walker};
 use light::Light;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs::File, path::PathBuf};
+use std::{collections::BTreeMap, fs::File, io::Write, path::PathBuf};
 
 use crate::{
     app_data::AppDataPath,
     core::{
         binds::{Binding, InputBindingSystem},
+        map::dto::{MapDe, MapSer},
         view::TPCameraTo,
     },
     editor::{update_editor_context, EditorContext},
     util::{Id, IdGen},
 };
-
-// TODO:
-// Split graph into MapHistory, and extract mapnodes to be only components
-// But let the map node "kind" be a generic variant when on the component
-// translate between the "enum" layout (best for storage) and "generic" layout (best for system queries)
-// OR, instead of generics, SPLIT up the MapNode into several components
-// - ID
-// - Metadata?
-// - Actual node (eg Brush)
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct Map {
@@ -57,18 +50,6 @@ pub struct MapAssets {
     pub default_material: Handle<StandardMaterial>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct MapFile {
-    map: Map,
-    editor: EditorContext,
-}
-
-impl std::fmt::Display for Id {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 /// Combines node id with its instantiated entity
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LiveMapNodeId {
@@ -76,7 +57,7 @@ pub struct LiveMapNodeId {
     pub entity: Entity,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum MapNode {
     Brush(Brush),
     Light(Light),
@@ -88,14 +69,6 @@ pub enum MapChange {
     Add(MapNode),
     Modify(Id, MapNode),
     Remove(Id),
-}
-
-/// Request to deploy a map node in the world. Entity id is expected to be an entity with a MapNodeId component.
-/// MapNode can be different from the one stored in the Map, to make temporary node changes in the editor.
-#[derive(Event)]
-pub struct DeployMapNode {
-    pub target_entity: Entity,
-    pub node: MapNode,
 }
 
 /// A "symmetric" map change that stores enough data to be reversable.
@@ -121,6 +94,14 @@ pub enum MapDelta {
 enum MapDeltaApplyError {
     NodeExists,
     NodeNotFound,
+}
+
+/// Request to deploy a map node in the world. Entity id is expected to be an entity with a MapNodeId component.
+/// MapNode can be different from the one stored in the Map, to make temporary node changes in the editor.
+#[derive(Event)]
+pub struct DeployMapNode {
+    pub target_entity: Entity,
+    pub node: MapNode,
 }
 
 impl Default for Map {
@@ -290,7 +271,7 @@ struct LoadingMap {
     task: Task<MapLoadResult>,
 }
 
-pub type MapLoadResult = Result<MapFile, postcard::Error>;
+pub type MapLoadResult = Result<MapDe, ron::Error>;
 
 pub const MAP_FILE_EXT: &str = "mmap";
 pub const DEFAULT_MAP_NAME: &str = "map";
@@ -322,7 +303,8 @@ fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
 
 async fn load_map_async(path: PathBuf) -> MapLoadResult {
     let bytes = std::fs::read(path).unwrap();
-    postcard::from_bytes::<MapFile>(&bytes)
+    MapDe::from_bytes(&bytes)
+    //postcard::from_bytes::<MapFile>(&bytes)
 }
 
 fn insert_map_when_loaded(
@@ -334,13 +316,13 @@ fn insert_map_when_loaded(
         commands.remove_resource::<LoadingMap>();
 
         match map_result {
-            Ok(map_file) => {
-                tp_writer.send(TPCameraTo(map_file.editor.camera_pos));
+            Ok(de_map) => {
+                tp_writer.send(TPCameraTo(de_map.editor_context.camera_pos));
                 commands.insert_resource(MapSession {
                     save_path: loading_map.path.clone(),
                 });
-                commands.insert_resource(map_file.map);
-                commands.insert_resource(map_file.editor);
+                commands.insert_resource(de_map.map);
+                commands.insert_resource(de_map.editor_context);
             }
             Err(err) => {
                 error!("Failed to load map: {}", err);
@@ -352,13 +334,14 @@ fn insert_map_when_loaded(
 fn save_map(map_session: Res<MapSession>, map: Res<Map>, editor_context: Res<EditorContext>) {
     // TODO: async, of course this would mean it can't run on AppExit.
 
-    let map_file = MapFile {
-        map: map.clone(),
-        editor: editor_context.clone(),
+    let map_ser = MapSer {
+        map: &map,
+        editor_context: &editor_context,
     };
 
-    let file = File::create(&map_session.save_path).unwrap();
-    postcard::to_io(&map_file, file).unwrap();
+    let mut file = File::create(&map_session.save_path).unwrap();
+    file.write_all(&map_ser.to_bytes().unwrap()).unwrap();
+    //postcard::to_io(&map_file, file).unwrap();
 
     info!("map saved to {:?}", map_session.save_path);
 }
