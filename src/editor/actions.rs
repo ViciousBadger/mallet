@@ -12,9 +12,9 @@ use crate::{
             nodes::{
                 brush::{Brush, BrushBounds},
                 light::{Light, LightType},
-                TypedMapNode,
+                MapNodeMeta, TypedMapNode,
             },
-            LiveMapNodeId, MapDeltaPush,
+            LiveMapNodeId, MapDeltaPush, MapLookup,
         },
     },
     editor::{
@@ -176,11 +176,24 @@ fn resize_brush_cleanup(mut commands: Commands) {
     commands.remove_resource::<ResizeBrushProcess>();
 }
 
-fn remove_node(sel_target: Res<SelectionTargets>) {
+fn remove_node(
+    sel_target: Res<SelectionTargets>,
+    q_nodes: Query<&MapNodeMeta>,
+    delta_events: EventWriter<MapDeltaPush>,
+) {
+    let meta = q_nodes.get(sel_target.focused.entity).unwrap();
+    // delta_events.send(MapDelta::RemoveNode {
+    //     id: sel_target.focused.node_id,
+    //     name: meta.name,
+    //     node: (),
+    // });
     // mod_events.send(MapChange::Remove(sel_target.focused.node_id));
 }
 
-fn add_light(sel_pos: Res<SelectedPos>, //, mut mod_events: EventWriter<MapChange>
+fn add_light(
+    sel_pos: Res<SelectedPos>,
+    mut id_gen: ResMut<IdGen>,
+    mut delta_events: EventWriter<MapDeltaPush>,
 ) {
     let light = Light {
         position: **sel_pos,
@@ -189,7 +202,14 @@ fn add_light(sel_pos: Res<SelectedPos>, //, mut mod_events: EventWriter<MapChang
         intensity: 30000.0,
         range: 20.0,
     };
-    // mod_events.send(MapChange::Add(MapNodeMeta::Light(light)));
+    delta_events.send(
+        MapDelta::AddNode {
+            id: id_gen.generate(),
+            name: "".to_string(),
+            node: TypedMapNode::Light(light),
+        }
+        .into(),
+    );
 }
 
 pub fn plugin(app: &mut App) {
