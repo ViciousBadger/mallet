@@ -5,7 +5,10 @@ use itertools::Itertools;
 use crate::{
     core::{
         binds::{Binding, InputBindingSystem},
-        map::{brush::Brush, LiveMapNodeId, MapNodeMeta},
+        map::{
+            nodes::{brush::Brush, MapNodeMeta},
+            LiveMapNodeId,
+        },
     },
     editor::{
         cursor::{CursorMode, SpatialAxis, SpatialCursor},

@@ -15,3 +15,7 @@ pub enum LightType {
     Point,
     Spot,
 }
+
+pub fn plugin(app: &mut App) {
+    //app.add_systems(PostUpdate, deploy_brushes);
+}

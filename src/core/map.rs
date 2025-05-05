@@ -1,8 +1,7 @@
-pub mod brush;
 mod dto;
-pub mod light;
+pub mod history;
+pub mod nodes;
 
-use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
     image::{
         ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler,
@@ -13,294 +12,31 @@ use bevy::{
     tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
 };
 use bimap::BiHashMap;
-use brush::Brush;
-use daggy::{Dag, NodeIndex, Walker};
 use itertools::Itertools;
-use light::Light;
-use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs::File, io::Write, path::PathBuf};
-use strum::{EnumDiscriminants, IntoDiscriminant};
+use std::{fs::File, io::Write, path::PathBuf};
 
 use crate::{
     app_data::AppDataPath,
     core::{
         binds::{Binding, InputBindingSystem},
-        map::dto::{MapDe, MapNodeSer, MapSer},
+        map::{
+            dto::{MapDe, MapNodeSer, MapSer},
+            history::{MapDelta, MapHistory},
+            nodes::{brush::Brush, light::Light, MapNodeMeta, TypedMapNode},
+        },
         view::TPCameraTo,
     },
     editor::{update_editor_context, EditorContext},
-    util::{Id, IdGen},
+    util::Id,
 };
-
-// TODO:
-// Split graph into MapHistory, and extract mapnodes to be only components
-// But let the map node "kind" be a generic variant when on the component
-// translate between the "enum" layout (best for storage) and "generic" layout (best for system queries)
-// OR, instead of generics, SPLIT up the MapNode into several components
-// - ID
-// - Metadata?
-// - Actual node (eg Brush)
-
-// #[derive(Resource, Serialize, Deserialize, Clone)]
-// pub struct Map {
-//     state: BTreeMap<Id, MapNode>,
-//     cur_delta_idx: NodeIndex<u32>,
-//     delta_graph: Dag<MapDelta, ()>,
-// }
-
-#[derive(Resource, Serialize, Deserialize)]
-pub struct MapHistory {
-    cur_delta_idx: NodeIndex<u32>,
-    delta_graph: Dag<MapDelta, ()>,
-}
-
-#[derive(Resource, Default, Deref, DerefMut)]
-pub struct MapLookup(BiHashMap<Id, Entity>);
 
 #[derive(Resource)]
 pub struct MapSession {
     pub save_path: PathBuf,
 }
 
-#[derive(Resource)]
-pub struct MapAssets {
-    pub default_material: Handle<StandardMaterial>,
-}
-
-// #[derive(Serialize, Deserialize, Clone)]
-// pub struct MapFile {
-//     map: Map,
-//     editor: EditorContext,
-// }
-
-/// Combines node id with its instantiated entity
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LiveMapNodeId {
-    pub node_id: Id,
-    pub entity: Entity,
-}
-
-// #[derive(Serialize, Deserialize, Clone, PartialEq, Component)]
-// pub enum MapNode {
-//     Brush(Brush),
-//     Light(Light),
-// }
-
-#[derive(Component, Debug, Clone, Serialize, Deserialize)]
-pub struct MapNodeMeta {
-    pub id: Id,
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Component, EnumDiscriminants)]
-#[strum_discriminants(derive(Serialize, Deserialize))]
-#[strum_discriminants(name(MapNodeType))]
-pub enum TypedMapNode {
-    Brush(Brush),
-    Light(Light),
-}
-
-impl TypedMapNode {
-    pub fn insert_as_component(&self, mut entity_cmds: EntityCommands) {
-        match self {
-            TypedMapNode::Brush(brush) => entity_cmds.insert(brush.clone()),
-            TypedMapNode::Light(light) => entity_cmds.insert(light.clone()),
-        };
-    }
-
-    pub fn remove_as_component<'a>(&self, mut entity_cmds: EntityCommands) {
-        match self.discriminant() {
-            MapNodeType::Brush => entity_cmds.remove::<Brush>(),
-            MapNodeType::Light => entity_cmds.remove::<Light>(),
-        };
-    }
-
-    // pub fn produce_deploy_event(&self, entity: Entity) -> DeployMapNode {
-    //     match self {
-    //         TypedMapNode::Brush(brush) => DeployMapNode {
-    //             entity,
-    //             node: brush.clone(),
-    //         },
-    //         TypedMapNode::Light(light) => DeployMapNode {
-    //             entity,
-    //             node: light.clone(),
-    //         },
-    //     }
-    // }
-}
-
-// Represents a proposed change to the map.
-// #[derive(Event)]
-// pub enum MapChange {
-//     Add(MapNodeKind),
-//     Modify(Id, MapNodeKind),
-//     Remove(Id),
-// }
-
-/// Request to deploy a map node in the world. Entity is expect to contain a map node component.
-#[derive(Event)]
-pub struct MapNodeDeploy {
-    pub target: Entity,
-}
-
-/// A "symmetric" map change that stores enough data to be reversable.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum MapDelta {
-    Nop,
-    AddNode {
-        id: Id,
-        name: String,
-        node: TypedMapNode,
-    },
-    ModifyNode {
-        id: Id,
-        before: TypedMapNode,
-        after: TypedMapNode,
-    },
-    RenameNode {
-        id: Id,
-        before: String,
-        after: String,
-    },
-    RemoveNode {
-        id: Id,
-        name: String,
-        node: TypedMapNode,
-    },
-}
-
-#[derive(Debug)]
-enum MapDeltaApplyError {
-    NodeExists,
-    NodeNotFound,
-}
-
-impl Default for MapHistory {
-    fn default() -> Self {
-        let mut graph: Dag<MapDelta, ()> = Dag::new();
-        let root_node = graph.add_node(MapDelta::Nop);
-        Self {
-            //state: BTreeMap::new(),
-            cur_delta_idx: root_node,
-            delta_graph: graph,
-        }
-    }
-}
-
-impl MapHistory {
-    // pub fn nodes(&self) -> impl Iterator<Item = &MapNode> {
-    //     self.state.values()
-    // }
-    //
-    // pub fn node_ids(&self) -> impl Iterator<Item = &Id> {
-    //     self.state.keys()
-    // }
-    //
-    // pub fn iter(&self) -> impl Iterator<Item = (&Id, &MapNode)> {
-    //     self.state.iter()
-    // }
-    //
-    // pub fn get_node(&self, id: &Id) -> Option<&MapNode> {
-    //     self.state.get(id)
-    // }
-    //
-    // pub fn has_node(&self, id: &Id) -> bool {
-    //     self.state.contains_key(id)
-    // }
-
-    pub fn push(&mut self, new_delta: MapDelta) {
-        // self.apply(&new_delta).unwrap();
-        let (_new_edge, new_node) = self
-            .delta_graph
-            .add_child(self.cur_delta_idx, (), new_delta);
-        self.cur_delta_idx = new_node;
-    }
-
-    // NOTE: can_undo and undo are seperate functions so that you can check if an action is
-    // possible without &mut access to the resource (to avoid triggering change detection).
-
-    pub fn can_undo(&self) -> bool {
-        self.delta_graph
-            .parents(self.cur_delta_idx)
-            .walk_next(&self.delta_graph)
-            .is_some()
-    }
-
-    #[must_use]
-    pub fn undo(&mut self) -> MapDelta {
-        let (_, parent_node_idx) = self
-            .delta_graph
-            .parents(self.cur_delta_idx)
-            .walk_next(&self.delta_graph)
-            .expect("Use can_undo() to check first");
-
-        let reverse_of_current = self
-            .delta_graph
-            .node_weight(self.cur_delta_idx)
-            .unwrap()
-            .reverse_of();
-
-        // TODO: Return the applied delta?
-        // self.apply(&reverse_of_current).unwrap();
-        self.cur_delta_idx = parent_node_idx;
-        reverse_of_current
-    }
-
-    pub fn can_redo(&self) -> bool {
-        self.delta_graph
-            .children(self.cur_delta_idx)
-            .walk_next(&self.delta_graph)
-            .is_some()
-    }
-
-    #[must_use]
-    pub fn redo(&mut self) -> MapDelta {
-        // Assume the last child node to be most relevant change tree.
-        let (_, child_node_idx) = self
-            .delta_graph
-            .children(self.cur_delta_idx)
-            .walk_next(&self.delta_graph)
-            .expect("Use can_redo() to check first");
-
-        let child_delta = self
-            .delta_graph
-            .node_weight(child_node_idx)
-            .unwrap()
-            .clone();
-        // TODO: Return the applied delta?
-        //self.apply(&child_delta).unwrap();
-        self.cur_delta_idx = child_node_idx;
-        child_delta
-    }
-
-    // fn apply(&mut self, action: &MapDelta) -> Result<(), MapDeltaApplyError> {
-    //     match action {
-    //         MapDelta::Nop => Ok(()),
-    //         MapDelta::AddNode { id, node } => {
-    //             if self.state.insert(*id, node.clone()).is_none() {
-    //                 Ok(())
-    //             } else {
-    //                 Err(MapDeltaApplyError::NodeExists)
-    //             }
-    //         }
-    //         MapDelta::ModifyNode { id, after, .. } => {
-    //             if let Some(node) = self.state.get_mut(id) {
-    //                 *node = after.clone();
-    //                 Ok(())
-    //             } else {
-    //                 Err(MapDeltaApplyError::NodeNotFound)
-    //             }
-    //         }
-    //         MapDelta::RemoveNode { id, .. } => {
-    //             if self.state.remove(id).is_some() {
-    //                 Ok(())
-    //             } else {
-    //                 Err(MapDeltaApplyError::NodeNotFound)
-    //             }
-    //         }
-    //     }
-    // }
-}
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct MapLookup(BiHashMap<Id, Entity>);
 
 impl MapLookup {
     pub fn node_to_entity(&self, node_id: &Id) -> Option<&Entity> {
@@ -312,32 +48,23 @@ impl MapLookup {
     }
 }
 
-impl MapDelta {
-    pub fn reverse_of(&self) -> MapDelta {
-        match self {
-            MapDelta::Nop => MapDelta::Nop,
-            MapDelta::AddNode { id, name, node } => MapDelta::RemoveNode {
-                id: *id,
-                name: name.clone(),
-                node: node.clone(),
-            },
-            MapDelta::ModifyNode { id, before, after } => MapDelta::ModifyNode {
-                id: *id,
-                before: after.clone(),
-                after: before.clone(),
-            },
-            MapDelta::RenameNode { id, before, after } => MapDelta::RenameNode {
-                id: *id,
-                before: after.clone(),
-                after: before.clone(),
-            },
-            MapDelta::RemoveNode { id, name, node } => MapDelta::AddNode {
-                id: *id,
-                name: name.clone(),
-                node: node.clone(),
-            },
-        }
-    }
+#[derive(Resource)]
+pub struct MapAssets {
+    pub default_material: Handle<StandardMaterial>,
+}
+
+/// Combines node id with its instantiated entity
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveMapNodeId {
+    pub node_id: Id,
+    pub entity: Entity,
+}
+
+/// Request to deploy a map node in the world.
+/// Entity is expect to contain a map node component.
+#[derive(Event)]
+pub struct MapNodeDeploy {
+    pub target: Entity,
 }
 
 #[derive(Resource)]
@@ -397,15 +124,10 @@ fn insert_map_when_loaded(
                     save_path: loading_map.path.clone(),
                 });
 
-                // let re = loadedmap.history.reconstruct().collect_vec();
-                // dbg!(&re);
-                // delta_apply.send(re.into());
-
                 commands.insert_resource(loadedmap.history);
                 commands.insert_resource(loadedmap.editor_context);
 
                 for de in loadedmap.brushes {
-                    commands.spawn((de.meta.clone(), de.node.clone()));
                     apply_evs.send(
                         MapDelta::AddNode {
                             id: de.meta.id,
@@ -510,37 +232,6 @@ fn load_map_assets(
     info!("loaded map assets.....");
 }
 
-// fn apply_changes_to_map(
-//     mut id_gen: ResMut<IdGen>,
-//     mut mod_events: EventReader<MapChange>,
-//     mut map_history: ResMut<MapHistory>,
-// ) {
-//     for mod_event in mod_events.read() {
-//         let delta = match mod_event {
-//             MapChange::Add(node) => MapDelta::AddNode {
-//                 id: id_gen.generate(),
-//                 node: node.clone(),
-//             },
-//             MapChange::Modify(node_id, node) => {
-//                 let prev = map_history.get_node(node_id).unwrap();
-//                 MapDelta::ModifyNode {
-//                     id: *node_id,
-//                     before: prev.clone(),
-//                     after: node.clone(),
-//                 }
-//             }
-//             MapChange::Remove(node_id) => {
-//                 let prev = map_history.get_node(node_id).unwrap();
-//                 MapDelta::RemoveNode {
-//                     id: *node_id,
-//                     node: prev.clone(),
-//                 }
-//             }
-//         };
-//         map_history.push(delta);
-//     }
-// }
-
 pub fn undo_map_change(
     mut history: ResMut<MapHistory>,
     mut delta_apply: EventWriter<MapDeltaApply>,
@@ -565,67 +256,7 @@ pub fn redo_map_change(
     }
 }
 
-// fn reflect_map_changes_in_world(
-//     map: Res<Map>,
-//     mut last_map: Local<Option<Map>>,
-//     mut map_lookup: ResMut<MapLookup>,
-//     mut deploy_events: EventWriter<DeployMapNode>,
-//     mut commands: Commands,
-// ) {
-//     info!("reflecting map changes !!");
-//
-//     if let Some(ref last_map) = *last_map {
-//         for (node_id, node) in map.iter() {
-//             if let Some(last_node) = last_map.get_node(node_id) {
-//                 if node != last_node {
-//                     // Modify
-//                     let entity_id = *map_lookup
-//                         .node_to_entity(node_id)
-//                         .expect("Modified node should already be instantiated in world");
-//                     deploy_events.send(DeployMapNode {
-//                         target_entity: entity_id,
-//                         node: node.clone(),
-//                     });
-//                 }
-//             } else {
-//                 // Add
-//                 let entity_id = commands.spawn(*node_id).id();
-//                 map_lookup.insert(*node_id, entity_id);
-//                 deploy_events.send(DeployMapNode {
-//                     target_entity: entity_id,
-//                     node: node.clone(),
-//                 });
-//             }
-//         }
-//
-//         let removed_node_entities: Vec<Entity> = last_map
-//             .node_ids()
-//             .filter(|id| !map.has_node(id))
-//             .filter_map(|id| map_lookup.node_to_entity(id))
-//             .cloned()
-//             .collect();
-//
-//         for entity in removed_node_entities {
-//             commands.entity(entity).despawn_recursive();
-//             map_lookup.remove_by_right(&entity);
-//         }
-//     } else {
-//         // Nothing to compare with, add all.
-//         for (node_id, node) in map.iter() {
-//             let entity_id = commands.spawn(*node_id).id();
-//             map_lookup.insert(*node_id, entity_id);
-//             deploy_events.send(DeployMapNode {
-//                 target_entity: entity_id,
-//                 node: node.clone(),
-//             });
-//             info!("add (nothing b4) {}", entity_id);
-//         }
-//     }
-//
-//     *last_map = Some(map.clone());
-// }
-
-/// Push map changes into the map history.
+/// Push map changes into the map history. (Will also apply to world)
 #[derive(Event, Clone)]
 pub struct MapDeltaPush(Vec<MapDelta>);
 
@@ -669,7 +300,6 @@ fn push_deltas(
         }
         delta_apply.send(MapDeltaApply(pushed_deltas.0.clone()));
     }
-    // TODO: This should work kinda like "reflect_changes_in_world" above.
 }
 
 fn apply_deltas(
@@ -707,10 +337,8 @@ fn apply_deltas(
                 commands.entity(*e).despawn_recursive();
             }
         }
-
         info!("apply: {:?}", delta);
     }
-    // TODO: This should work kinda like "reflect_changes_in_world" above.
 }
 
 fn pre_deploy_clean(mut deploy_events: EventReader<MapNodeDeploy>, mut commands: Commands) {
@@ -791,17 +419,17 @@ fn track_map_nodes(
 ) {
     for (entity, meta) in &q_inserted {
         lookup.insert(meta.id, entity);
-        info!("insert {}", entity);
+        info!("begin track {}: {}", meta.id, entity);
     }
     for removed_entity in q_removed.read() {
         lookup.remove_by_right(&removed_entity);
-        info!("remove {}", removed_entity);
+        info!("end track {}", removed_entity);
     }
 }
 
 pub fn plugin(app: &mut App) {
     //app.add_event::<DeployMapNode>();
-    app.add_plugins(brush::plugin);
+    app.add_plugins(nodes::plugin);
     app.add_event::<MapDeltaPush>()
         .add_event::<MapDeltaApply>()
         .add_event::<MapNodeDeploy>();

@@ -2,7 +2,7 @@ use bevy::utils::default;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::map::{brush::Brush, MapHistory, MapNodeMeta},
+    core::map::{nodes::brush::Brush, MapHistory, MapNodeMeta},
     editor::EditorContext,
 };
 

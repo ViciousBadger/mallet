@@ -8,9 +8,13 @@ use crate::{
     core::{
         binds::{Binding, InputBindingSystem},
         map::{
-            brush::{Brush, BrushBounds},
-            light::{Light, LightType},
-            LiveMapNodeId, MapDelta, MapDeltaPush, TypedMapNode,
+            history::MapDelta,
+            nodes::{
+                brush::{Brush, BrushBounds},
+                light::{Light, LightType},
+                TypedMapNode,
+            },
+            LiveMapNodeId, MapDeltaPush,
         },
     },
     editor::{
