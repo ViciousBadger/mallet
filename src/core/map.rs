@@ -143,9 +143,6 @@ pub struct MapNodeDeploy {
     pub target: Entity,
 }
 
-#[derive(Event, Default)]
-pub struct MapNodeDeployAll;
-
 /// A "symmetric" map change that stores enough data to be reversable.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum MapDelta {
@@ -276,16 +273,6 @@ impl MapHistory {
         child_delta
     }
 
-    pub fn reconstruct(&self) -> impl Iterator<Item = MapDelta> {
-        let thread = self
-            .delta_graph
-            .parents(self.cur_delta_idx)
-            .iter(&self.delta_graph)
-            .map(|(_, node_idx)| self.delta_graph.node_weight(node_idx).unwrap().clone())
-            .collect_vec();
-        thread.into_iter().rev()
-    }
-
     // fn apply(&mut self, action: &MapDelta) -> Result<(), MapDeltaApplyError> {
     //     match action {
     //         MapDelta::Nop => Ok(()),
@@ -398,8 +385,7 @@ fn insert_map_when_loaded(
     mut loading_map: ResMut<LoadingMap>,
     mut commands: Commands,
     mut tp_writer: EventWriter<TPCameraTo>,
-    mut delta_apply: EventWriter<MapDeltaApply>,
-    mut deploy_all_evs: EventWriter<MapNodeDeployAll>,
+    mut apply_evs: EventWriter<MapDeltaApply>,
 ) {
     if let Some(map_result) = block_on(future::poll_once(&mut loading_map.task)) {
         commands.remove_resource::<LoadingMap>();
@@ -411,12 +397,24 @@ fn insert_map_when_loaded(
                     save_path: loading_map.path.clone(),
                 });
 
-                let re = loadedmap.history.reconstruct().collect_vec();
-                dbg!(&re);
-                delta_apply.send(re.into());
+                // let re = loadedmap.history.reconstruct().collect_vec();
+                // dbg!(&re);
+                // delta_apply.send(re.into());
 
                 commands.insert_resource(loadedmap.history);
                 commands.insert_resource(loadedmap.editor_context);
+
+                for de in loadedmap.brushes {
+                    commands.spawn((de.meta.clone(), de.node.clone()));
+                    apply_evs.send(
+                        MapDelta::AddNode {
+                            id: de.meta.id,
+                            name: de.meta.name,
+                            node: TypedMapNode::Brush(de.node),
+                        }
+                        .into(),
+                    );
+                }
                 //commands.spawn_batch(loadedmap.brushes.into_iter().map(|de| (de.meta, de.node)));
                 //deploy_all_evs.send_default();
             }
@@ -715,15 +713,6 @@ fn apply_deltas(
     // TODO: This should work kinda like "reflect_changes_in_world" above.
 }
 
-fn deploy_all(
-    nodes: Query<Entity, With<MapNodeMeta>>,
-    mut deploy_events: EventWriter<MapNodeDeploy>,
-) {
-    nodes.iter().for_each(|entity| {
-        deploy_events.send(MapNodeDeploy { target: entity });
-    });
-}
-
 fn pre_deploy_clean(mut deploy_events: EventReader<MapNodeDeploy>, mut commands: Commands) {
     for event in deploy_events.read() {
         let mut entity_commands = commands.entity(event.target);
@@ -802,9 +791,11 @@ fn track_map_nodes(
 ) {
     for (entity, meta) in &q_inserted {
         lookup.insert(meta.id, entity);
+        info!("insert {}", entity);
     }
     for removed_entity in q_removed.read() {
         lookup.remove_by_right(&removed_entity);
+        info!("remove {}", removed_entity);
     }
 }
 
@@ -813,8 +804,7 @@ pub fn plugin(app: &mut App) {
     app.add_plugins(brush::plugin);
     app.add_event::<MapDeltaPush>()
         .add_event::<MapDeltaApply>()
-        .add_event::<MapNodeDeploy>()
-        .add_event::<MapNodeDeployAll>();
+        .add_event::<MapNodeDeploy>();
     app.init_resource::<MapLookup>();
     app.add_systems(Startup, (init_empty_map, start_loading_map));
     app.add_systems(
@@ -841,7 +831,6 @@ pub fn plugin(app: &mut App) {
             push_deltas,
             apply_deltas.after(push_deltas),
             pre_deploy_clean.after(apply_deltas),
-            deploy_all.run_if(on_event::<MapNodeDeployAll>),
             // apply_changes_to_map.run_if(resource_exists::<Map>),
             // reflect_map_changes_in_world.run_if(resource_exists_and_changed::<Map>),
             // deploy_nodes
