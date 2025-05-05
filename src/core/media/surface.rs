@@ -16,7 +16,7 @@ pub struct Surface {
     pub roughness: f32,
     pub reflectance: f32,
     #[serde(skip)]
-    pub handle: Handle<StandardMaterial>,
+    pub handles: SurfaceHandles,
 }
 
 impl Default for Surface {
@@ -24,7 +24,13 @@ impl Default for Surface {
         Self {
             roughness: 1.0,
             reflectance: 0.0,
-            handle: default(),
+            handles: default(),
         }
     }
+}
+
+#[derive(Debug, Default)]
+pub struct SurfaceHandles {
+    pub albedo_texture: Handle<Image>,
+    pub std_material: Handle<StandardMaterial>,
 }

@@ -14,7 +14,7 @@ use bevy::{
         ImageAddressMode, ImageLoader, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor,
     },
     prelude::*,
-    utils::HashMap,
+    utils::{HashMap, HashSet},
 };
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ use walkdir::WalkDir;
 use crate::{
     core::media::{
         dto::{MediaDe, MediaLibDe, MediaLibSer, MediaSer},
-        surface::Surface,
+        surface::{Surface, SurfaceHandles},
     },
     util::{Id, IdGen},
 };
@@ -69,16 +69,39 @@ impl MediaSrcConf {
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct MediaSources(HashMap<MediaSrc, MediaSrcConf>);
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct MediaMeta {
     pub path: PathBuf,
     pub hash: blake3::Hash,
+    pub dupe_idx: Option<u32>,
 }
 
 impl MediaMeta {
-    pub fn mod_eq(&self, other: &MediaMeta) -> bool {
-        self.path == other.path || self.hash == other.hash
+    pub fn diff(&self, other: &MediaMeta) -> MediaDiff {
+        let same_path = self.path == other.path;
+        let same_hash = self.hash == other.hash;
+
+        // if same_hash && self.dupe_idx != other.dupe_idx {
+        //     info!("ignoring a dupe {:?}", self.dupe_idx);
+        //     return MediaDiff::Unrelated;
+        // }
+
+        //let same_dupe_idx = self.dupe_idx == other.dupe_idx;
+        match (same_path, same_hash) {
+            (true, true) => MediaDiff::Identical,
+            (true, false) => MediaDiff::SamePath,
+            (false, true) => MediaDiff::SameContent,
+            (false, false) => MediaDiff::Unrelated,
+        }
     }
+}
+
+#[derive(PartialEq, Eq)]
+pub enum MediaDiff {
+    Identical,
+    SamePath,
+    SameContent,
+    Unrelated,
 }
 
 pub struct Media<T> {
@@ -98,12 +121,12 @@ impl<T> Default for MediaCollection<T> {
 }
 
 impl<T> MediaCollection<T> {
-    pub fn get(&self, id: &Id) -> Option<&T> {
-        self.0.get(id).map(|sourced| &sourced.content)
+    pub fn get(&self, id: &Id) -> Option<&Media<T>> {
+        self.0.get(id)
     }
 
-    pub fn get_mut(&mut self, id: &Id) -> Option<&mut T> {
-        self.0.get_mut(id).map(|sourced| &mut sourced.content)
+    pub fn get_mut(&mut self, id: &Id) -> Option<&mut Media<T>> {
+        self.0.get_mut(id)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&Id, &Media<T>)> {
@@ -197,6 +220,7 @@ fn media_sync(
         .expect("Synced source should be configured");
 
     let base_path = src_conf.fs_base_path.as_path();
+    let mut scanned: HashSet<PathBuf> = HashSet::new();
     for entry in WalkDir::new(base_path)
         .into_iter()
         .filter_map(|entry| entry.ok().filter(|entry| entry.file_type().is_file()))
@@ -206,60 +230,131 @@ fn media_sync(
         let meta = MediaMeta {
             path: media_path.to_path_buf(),
             hash: blake3::hash(&std::fs::read(full_path).unwrap()),
+            dupe_idx: None,
         };
         if let Some(ext) = full_path.extension().and_then(|osstr| osstr.to_str()) {
             if ImageLoader::SUPPORTED_FILE_EXTENSIONS.contains(&ext) {
-                // TODO: can't generalize among media types like this..
-                //
-                info!("now checking: {:?}", media_path);
-                let identical_found = surfaces.0.values().any(|media| media.meta == meta);
-                if identical_found {
-                    info!("unchanged: {:?}", media_path);
-                } else {
-                    // TODO: This breaks when duplicating a file, the hash will match and the file
-                    // will be seen as moved.
-                    let move_or_modify_found = surfaces
-                        .0
-                        .iter()
-                        .find(|(_, media)| media.meta.mod_eq(&meta))
-                        .map(|(id, _)| *id);
+                let diffs = surfaces
+                    .0
+                    .iter()
+                    .filter(|(_, media)| media.source == src)
+                    //.filter(|(_, media)| !scanned.contains(&media.meta.path))
+                    .map(|(id, media)| (*id, meta.diff(&media.meta)))
+                    .collect_vec();
 
-                    if let Some(existing_id) = move_or_modify_found {
-                        let already_has_hash = surfaces.0.values().any(|media| {
-                            media.meta.hash == meta.hash && media.meta.path != meta.path
-                        });
-                        info!(
-                            "moved or modified: {:?}, existing id {}",
-                            media_path, existing_id
-                        );
-                        if already_has_hash {
-                            info!("IDENTICAL HASH ALSO FOUND W DIFF PATH ..");
+                #[derive(PartialEq)]
+                enum Act {
+                    CreateFresh,
+                    CreateDupe(u32),
+                    NoOp,
+                }
+
+                info!("-------- scanning: {:?}", meta.path);
+
+                let act = if diffs.iter().any(|(_, diff)| diff == &MediaDiff::Identical) {
+                    info!("already registered and no change: {:?}", meta.path);
+                    Act::NoOp
+                } else if diffs.iter().all(|(_, diff)| diff == &MediaDiff::Unrelated) {
+                    info!("new media: {:?}", meta.path);
+                    Act::CreateFresh
+                } else if let Some(modified) =
+                    diffs.iter().find(|(_, diff)| diff == &MediaDiff::SamePath)
+                {
+                    //let mut surf = surfaces.get_mut(&modified.0).unwrap();
+                    asset_server.reload(src_conf.asset_path(media_path));
+                    info!("modified: {}", modified.0);
+                    Act::NoOp
+                } else {
+                    let clones = diffs
+                        .iter()
+                        .filter(|(id, diff)| diff == &MediaDiff::SameContent);
+                    Act::NoOp
+                };
+                // } else if let Some(existing) = diffs
+                //     .iter()
+                //     .find(|(_, diff)| diff == &MediaDiff::SameContent)
+                // {
+                // let surf = surfaces.get_mut(&existing.0).unwrap();
+                //
+                // info!(
+                //     "found another with same content. gotta check {:?}..",
+                //     &surf.meta.path
+                // );
+                //
+                // let full_path = src_conf.file_path(&surf.meta.path);
+                // if full_path.exists() {
+                //     info!("we ensured that {:?} still exists!", full_path);
+                //     // duplicate!
+                //     let next_dupe_idx = surfaces
+                //         .iter()
+                //         .filter(|(_, media)| media.meta.hash == meta.hash)
+                //         .map(|(_, media)| media.meta.dupe_idx.map(|id| id + 1).unwrap_or(0))
+                //         .max()
+                //         .unwrap_or(0);
+                //     info!("duplicated: {}, next idx {}", existing.0, next_dupe_idx);
+                //     Act::CreateDupe(next_dupe_idx)
+                // } else {
+                //     // move!
+                //     info!("moved: {}", existing.0);
+                //     surf.meta.path = meta.path.clone();
+                //     Act::NoOp
+                // }
+                //     //surf.asset_server.reload(src_conf.asset_path(media_path));
+                // } else {
+                //     Act::NoOp
+                // };
+
+                if act != Act::NoOp {
+                    let meta = if let Act::CreateDupe(dupe_idx) = act {
+                        MediaMeta {
+                            path: meta.path.clone(),
+                            hash: meta.hash,
+                            dupe_idx: Some(dupe_idx),
                         }
                     } else {
-                        info!("newly added: {:?}", media_path);
-                    }
+                        meta
+                    };
 
-                    let id = move_or_modify_found.unwrap_or_else(|| id_gen.generate());
-
+                    let id = id_gen.generate();
                     let mut surf = Surface::default();
+
+                    let img = asset_server.load_with_settings(
+                        src_conf.asset_path(media_path),
+                        surface_image_settings,
+                    );
+
                     let std_mat = standard_materials.add(StandardMaterial {
                         perceptual_roughness: surf.roughness,
                         reflectance: surf.reflectance,
-                        base_color_texture: Some(asset_server.load_with_settings(
-                            src_conf.asset_path(media_path),
-                            surface_image_settings,
-                        )),
+                        base_color_texture: Some(img.clone()),
                         ..default()
                     });
-                    surf.handle = std_mat;
-
+                    surf.handles = SurfaceHandles {
+                        albedo_texture: img,
+                        std_material: std_mat,
+                    };
                     surfaces.insert(id, src, meta, surf);
                 }
             }
         } else {
             info!("{:?} has no file extension. Ignoring", full_path);
         }
+        scanned.insert(media_path.to_path_buf());
     }
+
+    let to_remove = surfaces
+        .iter()
+        .filter_map(|(id, media)| {
+            (!src_conf.file_path(&media.meta.path).exists())
+                .then_some((media.meta.path.to_path_buf(), *id))
+        })
+        .collect_vec();
+
+    for (path, id) in to_remove {
+        info!("remove {:?}, path missing", path);
+        surfaces.remove(&id);
+    }
+
     commands.trigger(MediaSave(src));
 }
 
