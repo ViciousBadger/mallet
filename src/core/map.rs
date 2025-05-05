@@ -90,7 +90,6 @@ pub struct LiveMapNodeId {
 pub struct MapNodeMeta {
     pub id: Id,
     pub name: String,
-    pub node_type: MapNodeType,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Component, EnumDiscriminants)]
@@ -102,12 +101,31 @@ pub enum TypedMapNode {
 }
 
 impl TypedMapNode {
-    // pub fn component(&self) -> impl Component {
-    //     todo!();
-    //     // match self {
-    //     //     TypedMapNode::Brush(brush) => brush.clone(),
-    //     //     TypedMapNode::Light(light) => light.clone(),
-    //     // }
+    pub fn insert_as_component(&self, mut entity_cmds: EntityCommands) {
+        match self {
+            TypedMapNode::Brush(brush) => entity_cmds.insert(brush.clone()),
+            TypedMapNode::Light(light) => entity_cmds.insert(light.clone()),
+        };
+    }
+
+    pub fn remove_as_component<'a>(&self, mut entity_cmds: EntityCommands) {
+        match self.discriminant() {
+            MapNodeType::Brush => entity_cmds.remove::<Brush>(),
+            MapNodeType::Light => entity_cmds.remove::<Light>(),
+        };
+    }
+
+    // pub fn produce_deploy_event(&self, entity: Entity) -> DeployMapNode {
+    //     match self {
+    //         TypedMapNode::Brush(brush) => DeployMapNode {
+    //             entity,
+    //             node: brush.clone(),
+    //         },
+    //         TypedMapNode::Light(light) => DeployMapNode {
+    //             entity,
+    //             node: light.clone(),
+    //         },
+    //     }
     // }
 }
 
@@ -119,13 +137,14 @@ impl TypedMapNode {
 //     Remove(Id),
 // }
 
-/// Request to deploy a map node in the world. Entity id is expected to be an entity with a MapNodeId component.
-/// MapNode can be different from the one stored in the Map, to make temporary node changes in the editor.
+/// Request to deploy a map node in the world. Entity is expect to contain a map node component.
 #[derive(Event)]
-pub struct DeployMapNode<T> {
-    pub entity: Entity,
-    pub node: T,
+pub struct MapNodeDeploy {
+    pub target: Entity,
 }
+
+#[derive(Event, Default)]
+pub struct MapNodeDeployAll;
 
 /// A "symmetric" map change that stores enough data to be reversable.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -210,7 +229,8 @@ impl MapHistory {
             .is_some()
     }
 
-    pub fn undo(&mut self) {
+    #[must_use]
+    pub fn undo(&mut self) -> MapDelta {
         let (_, parent_node_idx) = self
             .delta_graph
             .parents(self.cur_delta_idx)
@@ -226,6 +246,7 @@ impl MapHistory {
         // TODO: Return the applied delta?
         // self.apply(&reverse_of_current).unwrap();
         self.cur_delta_idx = parent_node_idx;
+        reverse_of_current
     }
 
     pub fn can_redo(&self) -> bool {
@@ -235,7 +256,8 @@ impl MapHistory {
             .is_some()
     }
 
-    pub fn redo(&mut self) {
+    #[must_use]
+    pub fn redo(&mut self) -> MapDelta {
         // Assume the last child node to be most relevant change tree.
         let (_, child_node_idx) = self
             .delta_graph
@@ -251,6 +273,17 @@ impl MapHistory {
         // TODO: Return the applied delta?
         //self.apply(&child_delta).unwrap();
         self.cur_delta_idx = child_node_idx;
+        child_delta
+    }
+
+    pub fn reconstruct(&self) -> impl Iterator<Item = MapDelta> {
+        let thread = self
+            .delta_graph
+            .parents(self.cur_delta_idx)
+            .iter(&self.delta_graph)
+            .map(|(_, node_idx)| self.delta_graph.node_weight(node_idx).unwrap().clone())
+            .collect_vec();
+        thread.into_iter().rev()
     }
 
     // fn apply(&mut self, action: &MapDelta) -> Result<(), MapDeltaApplyError> {
@@ -359,13 +392,14 @@ fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
 async fn load_map_async(path: PathBuf) -> MapLoadResult {
     let bytes = std::fs::read(path).unwrap();
     MapDe::from_bytes(&bytes)
-    //ron::from_str::<MapDe>(&bytes)
 }
 
 fn insert_map_when_loaded(
     mut loading_map: ResMut<LoadingMap>,
     mut commands: Commands,
     mut tp_writer: EventWriter<TPCameraTo>,
+    mut delta_apply: EventWriter<MapDeltaApply>,
+    mut deploy_all_evs: EventWriter<MapNodeDeployAll>,
 ) {
     if let Some(map_result) = block_on(future::poll_once(&mut loading_map.task)) {
         commands.remove_resource::<LoadingMap>();
@@ -376,10 +410,15 @@ fn insert_map_when_loaded(
                 commands.insert_resource(MapSession {
                     save_path: loading_map.path.clone(),
                 });
-                commands.spawn_batch(loadedmap.brushes.into_iter().map(|de| (de.meta, de.node)));
-                //commands.insert_resource(map_file.map);
-                // TODO: insert all map nodes..
+
+                let re = loadedmap.history.reconstruct().collect_vec();
+                dbg!(&re);
+                delta_apply.send(re.into());
+
+                commands.insert_resource(loadedmap.history);
                 commands.insert_resource(loadedmap.editor_context);
+                //commands.spawn_batch(loadedmap.brushes.into_iter().map(|de| (de.meta, de.node)));
+                //deploy_all_evs.send_default();
             }
             Err(err) => {
                 error!("Failed to load map: {}", err);
@@ -431,9 +470,7 @@ fn init_empty_map(
     map_session: Option<Res<MapSession>>,
     mut commands: Commands,
 ) {
-    // commands.insert_resource(Map::default());
     commands.insert_resource(MapHistory::default());
-    // TODO:Should probably also reset session, equivalent of "new file" in most editors
     if map_session.is_none() {
         commands.insert_resource(MapSession {
             save_path: [data_path.get(), &default_map_filename()].iter().collect(),
@@ -472,6 +509,7 @@ fn load_map_assets(
     commands.insert_resource(MapAssets {
         default_material: material,
     });
+    info!("loaded map assets.....");
 }
 
 // fn apply_changes_to_map(
@@ -510,8 +548,8 @@ pub fn undo_map_change(
     mut delta_apply: EventWriter<MapDeltaApply>,
 ) {
     if history.can_undo() {
-        history.undo();
-        // TODO: capture and apply delta
+        let delta = history.undo();
+        delta_apply.send(delta.into());
     } else {
         info!("Nothing to undo");
     }
@@ -522,8 +560,8 @@ pub fn redo_map_change(
     mut delta_apply: EventWriter<MapDeltaApply>,
 ) {
     if history.can_redo() {
-        history.redo();
-        // TODO: capture and apply delta
+        let delta = history.redo();
+        delta_apply.send(delta.into());
     } else {
         info!("Nothing to redo");
     }
@@ -609,6 +647,18 @@ impl From<Vec<MapDelta>> for MapDeltaPush {
 #[derive(Event, Clone)]
 pub struct MapDeltaApply(Vec<MapDelta>);
 
+impl From<MapDelta> for MapDeltaApply {
+    fn from(value: MapDelta) -> Self {
+        Self(vec![value])
+    }
+}
+
+impl From<Vec<MapDelta>> for MapDeltaApply {
+    fn from(value: Vec<MapDelta>) -> Self {
+        Self(value)
+    }
+}
+
 fn push_deltas(
     mut delta_events: EventReader<MapDeltaPush>,
     mut delta_apply: EventWriter<MapDeltaApply>,
@@ -627,7 +677,7 @@ fn push_deltas(
 fn apply_deltas(
     lookup: Res<MapLookup>,
     mut delta_events: EventReader<MapDeltaApply>,
-    mut deploy_brush_evs: EventWriter<DeployMapNode<Brush>>,
+    mut deploy_evs: EventWriter<MapNodeDeploy>,
     mut q_nodes: Query<&mut MapNodeMeta>,
     mut commands: Commands,
 ) {
@@ -635,23 +685,55 @@ fn apply_deltas(
         match delta {
             MapDelta::Nop => (),
             MapDelta::AddNode { id, name, node } => {
-                commands.spawn(MapNodeMeta {
+                let mut cmds = commands.spawn(MapNodeMeta {
                     id: *id,
                     name: name.clone(),
-                    node_type: node.discriminant(),
                 });
+                node.insert_as_component(cmds.reborrow());
+                deploy_evs.send(MapNodeDeploy { target: cmds.id() });
             }
             MapDelta::ModifyNode { id, before, after } => {
                 let e = lookup.node_to_entity(id).unwrap();
-                //commands.entity(e).insert(after)
+                let mut cmds = commands.entity(*e);
+                before.remove_as_component(cmds.reborrow());
+                after.insert_as_component(cmds.reborrow());
+                deploy_evs.send(MapNodeDeploy { target: cmds.id() });
             }
-            MapDelta::RenameNode { id, before, after } => {}
-            MapDelta::RemoveNode { id, name, node } => {}
+            MapDelta::RenameNode { id, after, .. } => {
+                let e = lookup.node_to_entity(id).unwrap();
+                let mut meta = q_nodes.get_mut(*e).unwrap();
+                meta.name = after.clone();
+            }
+            MapDelta::RemoveNode { id, .. } => {
+                let e = lookup.node_to_entity(id).unwrap();
+                commands.entity(*e).despawn_recursive();
+            }
         }
 
         info!("apply: {:?}", delta);
     }
     // TODO: This should work kinda like "reflect_changes_in_world" above.
+}
+
+fn deploy_all(
+    nodes: Query<Entity, With<MapNodeMeta>>,
+    mut deploy_events: EventWriter<MapNodeDeploy>,
+) {
+    nodes.iter().for_each(|entity| {
+        deploy_events.send(MapNodeDeploy { target: entity });
+    });
+}
+
+fn pre_deploy_clean(mut deploy_events: EventReader<MapNodeDeploy>, mut commands: Commands) {
+    for event in deploy_events.read() {
+        let mut entity_commands = commands.entity(event.target);
+        entity_commands.despawn_descendants();
+        // NOTE: When this is applied, the Children component will be gone, so it's important to
+        // despawn descendants BEFORE retaining.
+        // NOTE: "retain" method here has to make sure ALL map node variants are retained,
+        // feels a little silly..
+        entity_commands.retain::<(MapNodeMeta, Brush, Light)>();
+    }
 }
 
 // fn deploy_nodes(
@@ -713,10 +795,26 @@ fn apply_deltas(
 //     }
 // }
 
+fn track_map_nodes(
+    q_inserted: Query<(Entity, &MapNodeMeta), Added<MapNodeMeta>>,
+    mut q_removed: RemovedComponents<MapNodeMeta>,
+    mut lookup: ResMut<MapLookup>,
+) {
+    for (entity, meta) in &q_inserted {
+        lookup.insert(meta.id, entity);
+    }
+    for removed_entity in q_removed.read() {
+        lookup.remove_by_right(&removed_entity);
+    }
+}
+
 pub fn plugin(app: &mut App) {
     //app.add_event::<DeployMapNode>();
-    app.add_event::<MapDeltaPush>();
-    app.add_event::<MapDeltaApply>();
+    app.add_plugins(brush::plugin);
+    app.add_event::<MapDeltaPush>()
+        .add_event::<MapDeltaApply>()
+        .add_event::<MapNodeDeploy>()
+        .add_event::<MapNodeDeployAll>();
     app.init_resource::<MapLookup>();
     app.add_systems(Startup, (init_empty_map, start_loading_map));
     app.add_systems(
@@ -742,6 +840,8 @@ pub fn plugin(app: &mut App) {
             insert_map_when_loaded.run_if(resource_exists::<LoadingMap>),
             push_deltas,
             apply_deltas.after(push_deltas),
+            pre_deploy_clean.after(apply_deltas),
+            deploy_all.run_if(on_event::<MapNodeDeployAll>),
             // apply_changes_to_map.run_if(resource_exists::<Map>),
             // reflect_map_changes_in_world.run_if(resource_exists_and_changed::<Map>),
             // deploy_nodes
@@ -749,4 +849,5 @@ pub fn plugin(app: &mut App) {
             //     .after(load_map_assets),
         ),
     );
+    app.add_systems(Last, track_map_nodes.run_if(on_event::<MapDeltaApply>));
 }
