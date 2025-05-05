@@ -8,20 +8,16 @@ use crate::{
     core::{
         binds::{Binding, InputBindingSystem},
         map::{
-            history::MapDelta,
-            nodes::{
-                brush::{Brush, BrushBounds},
-                light::{Light, LightType},
-                MapNodeMeta, TypedMapNode,
-            },
-            LiveMapNodeId, MapDeltaPush, MapLookup,
+            brush::{Brush, BrushBounds},
+            light::{Light, LightType},
+            DeployMapNode, LiveMapNodeId, Map, MapChange, MapNode,
         },
     },
     editor::{
         selection::{SelTargetBrushSide, SelectedPos, SelectionTargets},
         EditorSystems,
     },
-    util::{Facing3d, IdGen},
+    util::Facing3d,
 };
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,27 +61,14 @@ fn end_building_brush_here(
     process: Res<BuildBrushProcess>,
     sel_pos: Res<SelectedPos>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
-    mut map_deltas: EventWriter<MapDeltaPush>,
-    mut id_gen: ResMut<IdGen>,
-    // mut map_changes: EventWriter<MapChange>,
-    //
+    mut map_changes: EventWriter<MapChange>,
 ) {
     let start = process.start;
     let end = **sel_pos;
     let bounds = BrushBounds::new(start, end);
 
-    // TODO: Send a map delta instead
-
     if bounds.is_valid() {
-        //map_changes.send(MapChange::Add(MapNode::Brush(Brush { bounds })));
-        map_deltas.send(
-            MapDelta::AddNode {
-                id: id_gen.generate(),
-                name: "".to_owned(),
-                node: TypedMapNode::Brush(Brush { bounds }),
-            }
-            .into(),
-        );
+        map_changes.send(MapChange::Add(MapNode::Brush(Brush { bounds })));
         next_editor_action.set(EditorAction::None);
     }
 }
@@ -135,40 +118,36 @@ fn live_brush_resize(
     sel_pos: Res<SelectedPos>,
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
-    // mut deploy_events: EventWriter<DeployMapNode>,
+    mut deploy_events: EventWriter<DeployMapNode>,
 ) {
     let brush = q_brushes.get(process.brush.entity).unwrap();
     let resized_brush = Brush {
         bounds: brush.bounds.resized(process.side, **sel_pos),
     };
-    // deploy_events.send(DeployMapNode {
-    //     target_entity: process.brush.entity,
-    //     node: MapNodeMeta::Brush(resized_brush),
-    // });
+    deploy_events.send(DeployMapNode {
+        target_entity: process.brush.entity,
+        node: MapNode::Brush(resized_brush),
+    });
 }
 
 fn end_resizing_brush_here(
     sel_pos: Res<SelectedPos>,
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
-    // map: Res<Map>,
-    // mut mod_events: EventWriter<MapChange>,
+    map: Res<Map>,
+    mut mod_events: EventWriter<MapChange>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
 ) {
     let brush = q_brushes.get(process.brush.entity).unwrap();
-    // let resized_bounds = brush.bounds.resized(process.side, **sel_pos);
-    // let MapNodeMeta::Brush(mut brush) = map.get_node(&process.brush.node_id).unwrap().clone()
-    // else {
-    //     panic!("notabrush")
-    // };
-    // brush.bounds = resized_bounds;
-
-    // TODO: Send a map delta instead
-    //
-    // mod_events.send(MapChange::Modify(
-    //     process.brush.node_id,
-    //     MapNode::Brush(brush),
-    // ));
+    let resized_bounds = brush.bounds.resized(process.side, **sel_pos);
+    let MapNode::Brush(mut brush) = map.get_node(&process.brush.node_id).unwrap().clone() else {
+        panic!("notabrush")
+    };
+    brush.bounds = resized_bounds;
+    mod_events.send(MapChange::Modify(
+        process.brush.node_id,
+        MapNode::Brush(brush),
+    ));
     next_editor_action.set(EditorAction::None);
 }
 
@@ -176,25 +155,11 @@ fn resize_brush_cleanup(mut commands: Commands) {
     commands.remove_resource::<ResizeBrushProcess>();
 }
 
-fn remove_node(
-    sel_target: Res<SelectionTargets>,
-    q_nodes: Query<&MapNodeMeta>,
-    delta_events: EventWriter<MapDeltaPush>,
-) {
-    let meta = q_nodes.get(sel_target.focused.entity).unwrap();
-    // delta_events.send(MapDelta::RemoveNode {
-    //     id: sel_target.focused.node_id,
-    //     name: meta.name,
-    //     node: (),
-    // });
-    // mod_events.send(MapChange::Remove(sel_target.focused.node_id));
+fn remove_node(sel_target: Res<SelectionTargets>, mut mod_events: EventWriter<MapChange>) {
+    mod_events.send(MapChange::Remove(sel_target.focused.node_id));
 }
 
-fn add_light(
-    sel_pos: Res<SelectedPos>,
-    mut id_gen: ResMut<IdGen>,
-    mut delta_events: EventWriter<MapDeltaPush>,
-) {
+fn add_light(sel_pos: Res<SelectedPos>, mut mod_events: EventWriter<MapChange>) {
     let light = Light {
         position: **sel_pos,
         light_type: LightType::Point,
@@ -202,14 +167,7 @@ fn add_light(
         intensity: 30000.0,
         range: 20.0,
     };
-    delta_events.send(
-        MapDelta::AddNode {
-            id: id_gen.generate(),
-            name: "".to_string(),
-            node: TypedMapNode::Light(light),
-        }
-        .into(),
-    );
+    mod_events.send(MapChange::Add(MapNode::Light(light)));
 }
 
 pub fn plugin(app: &mut App) {

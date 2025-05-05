@@ -5,10 +5,7 @@ use itertools::Itertools;
 use crate::{
     core::{
         binds::{Binding, InputBindingSystem},
-        map::{
-            nodes::{brush::Brush, MapNodeMeta},
-            LiveMapNodeId,
-        },
+        map::{brush::Brush, LiveMapNodeId},
     },
     editor::{
         cursor::{CursorMode, SpatialAxis, SpatialCursor},
@@ -54,7 +51,7 @@ pub struct SelectionChanged;
 fn find_targets_at_selection(
     sel_pos: Option<Res<SelectedPos>>,
     spatial_query: SpatialQuery,
-    q_map_nodes: Query<&MapNodeMeta>,
+    q_map_nodes: Query<&Id>,
     sel_targets: Option<ResMut<SelectionTargets>>,
     mut commands: Commands,
 ) {
@@ -63,10 +60,13 @@ fn find_targets_at_selection(
             .point_intersections(**sel_pos, &SpatialQueryFilter::default())
             .iter()
             .filter_map(|entity_id| {
-                q_map_nodes.get(*entity_id).ok().map(|meta| LiveMapNodeId {
-                    node_id: meta.id,
-                    entity: *entity_id,
-                })
+                q_map_nodes
+                    .get(*entity_id)
+                    .ok()
+                    .map(|node_id| LiveMapNodeId {
+                        node_id: *node_id,
+                        entity: *entity_id,
+                    })
             })
             .collect_vec();
 

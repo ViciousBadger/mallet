@@ -1,20 +1,19 @@
-use avian3d::prelude::*;
 use bevy::{
     asset::RenderAssetUsages,
     prelude::*,
     render::mesh::{
         Indices,
-        PrimitiveTopology::{self},
+        PrimitiveTopology::{self, TriangleList},
     },
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::map::{MapAssets, MapNodeDeploy, MapNodeMeta},
-    util::Facing3d,
+    core::map::{DeployMapNode, MapAssets, MapNode},
+    util::{Facing3d, Id},
 };
 
-#[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Component, Serialize, Deserialize, Clone, PartialEq)]
 #[require(Visibility, Transform)]
 pub struct Brush {
     pub bounds: BrushBounds,
@@ -167,40 +166,17 @@ impl MeshBuilder for BrushSideMeshBuilder {
 
 pub fn deploy_brushes(
     map_assets: Res<MapAssets>,
-    q_brushes: Query<(Entity, &MapNodeMeta, &Brush)>,
-    mut deploy_events: EventReader<MapNodeDeploy>,
+    q_brushes: Query<(&Id, &Brush)>,
+    mut deploy_events: EventReader<DeployMapNode>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
+    // TODO: insert the "inner" component of the mapnode before deploy
+    // (source of truth = component) ??!???!?! confuse
     for event in deploy_events.read() {
-        if let Ok((entity, _meta, brush)) = q_brushes.get(event.target) {
-            // Brush will use base entity as a container for sides.
-            let center = brush.bounds.center();
-            let size = brush.bounds.size();
-
-            let mut entity_commands = commands.entity(entity);
-
-            entity_commands.insert((
-                brush.clone(),
-                Transform::IDENTITY.with_translation(center),
-                RigidBody::Static,
-                Collider::cuboid(size.x, size.y, size.z),
-            ));
-
-            for side in brush.bounds.sides_local() {
-                commands
-                    .spawn((
-                        Transform::IDENTITY.with_translation(side.pos),
-                        Mesh3d(meshes.add(side.mesh())),
-                        //MeshMaterial3d(materials.add(color)),
-                        MeshMaterial3d(map_assets.default_material.clone()),
-                    ))
-                    .set_parent(event.target);
-            }
+        if let Ok((id, brush)) = q_brushes.get(event.target_entity) {
+            info!("yee");
         }
+        //if let MapNode::Brush(brush) = &event.node {}
     }
-}
-
-pub fn plugin(app: &mut App) {
-    app.add_systems(PostUpdate, deploy_brushes);
 }

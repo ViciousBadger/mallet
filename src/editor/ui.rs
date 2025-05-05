@@ -82,6 +82,6 @@ fn init_ui(mut commands: Commands) {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<ClickBlocker>();
-    // app.add_systems(OnEnter(AppState::InEditor), init_ui);
-    // app.add_systems(Update, clicktest);
+    app.add_systems(OnEnter(AppState::InEditor), init_ui);
+    app.add_systems(Update, clicktest);
 }
