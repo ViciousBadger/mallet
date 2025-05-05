@@ -1,6 +1,9 @@
-use bevy::{color::palettes::css, prelude::*, ui::BackgroundColor, utils::HashSet};
+use bevy::{color::palettes::css, ecs::entity, prelude::*, ui::BackgroundColor, utils::HashSet};
 
-use crate::core::AppState;
+use crate::core::{
+    media::{surface::Surface, MediaCollection},
+    AppState,
+};
 
 #[derive(Component)]
 pub struct PreventClicks;
@@ -29,6 +32,9 @@ fn clicktest(
     }
 }
 
+#[derive(Component)]
+pub struct SurfaceList;
+
 fn init_ui(mut commands: Commands) {
     commands
         .spawn((
@@ -51,37 +57,74 @@ fn init_ui(mut commands: Commands) {
                 ..default()
             },
             BackgroundColor(Color::Srgba(css::BLACK)),
+            SurfaceList,
         ))
         .with_children(|builder| {
-            builder.spawn((
-                Node {
-                    padding: UiRect {
-                        left: Val::Px(8.),
-                        right: Val::Px(8.),
-                        top: Val::Px(8.),
-                        bottom: Val::Px(8.),
-                    },
-                    ..default()
-                }, // font?
-                Text::new("hello world!!!!"),
-            ));
-            builder.spawn((
-                Node {
-                    padding: UiRect {
-                        left: Val::Px(8.),
-                        right: Val::Px(8.),
-                        top: Val::Px(8.),
-                        bottom: Val::Px(8.),
-                    },
-                    ..default()
-                }, // font?
-                Text::new("hello world!!!!"),
-            ));
+            // builder.spawn((
+            //     Node {
+            //         padding: UiRect {
+            //             left: Val::Px(8.),
+            //             right: Val::Px(8.),
+            //             top: Val::Px(8.),
+            //             bottom: Val::Px(8.),
+            //         },
+            //         ..default()
+            //     }, // font?
+            //     Text::new("hello world!!!!"),
+            // ));
+            // builder.spawn((
+            //     Node {
+            //         padding: UiRect {
+            //             left: Val::Px(8.),
+            //             right: Val::Px(8.),
+            //             top: Val::Px(8.),
+            //             bottom: Val::Px(8.),
+            //         },
+            //         ..default()
+            //     }, // font?
+            //     Text::new("hello world!!!!"),
+            // ));
         });
+}
+
+fn update_surf_list(
+    surfaces: Res<MediaCollection<Surface>>,
+    q_lists: Query<Entity, With<SurfaceList>>,
+    mut commands: Commands,
+) {
+    for list_entity in q_lists.iter() {
+        let mut entity_cmds = commands.entity(list_entity);
+        entity_cmds.despawn_descendants();
+
+        entity_cmds.with_children(|builder| {
+            for (_id, surface) in surfaces.iter() {
+                builder
+                    .spawn((
+                        Node {
+                            padding: UiRect {
+                                left: Val::Px(8.),
+                                right: Val::Px(8.),
+                                top: Val::Px(8.),
+                                bottom: Val::Px(8.),
+                            },
+                            ..default()
+                        },
+                        Button,
+                    ))
+                    .with_child(Text::new(surface.meta.path.to_string_lossy()));
+            }
+        });
+    }
 }
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<ClickBlocker>();
-    //app.add_systems(OnEnter(AppState::InEditor), init_ui);
-    app.add_systems(Update, clicktest);
+    app.add_systems(OnEnter(AppState::InEditor), init_ui);
+    app.add_systems(
+        Update,
+        (
+            clicktest,
+            update_surf_list.run_if(resource_exists_and_changed::<MediaCollection<Surface>>),
+        ),
+    );
 }

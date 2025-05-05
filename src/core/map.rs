@@ -304,7 +304,6 @@ fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
 async fn load_map_async(path: PathBuf) -> MapLoadResult {
     let bytes = std::fs::read(path).unwrap();
     MapDe::from_bytes(&bytes)
-    //postcard::from_bytes::<MapFile>(&bytes)
 }
 
 fn insert_map_when_loaded(
@@ -341,7 +340,6 @@ fn save_map(map_session: Res<MapSession>, map: Res<Map>, editor_context: Res<Edi
 
     let mut file = File::create(&map_session.save_path).unwrap();
     file.write_all(&map_ser.to_bytes().unwrap()).unwrap();
-    //postcard::to_io(&map_file, file).unwrap();
 
     info!("map saved to {:?}", map_session.save_path);
 }

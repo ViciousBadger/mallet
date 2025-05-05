@@ -343,7 +343,7 @@ fn select_by_picking(
         let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
 
         let hit = spatial_query.cast_ray(ray.origin, ray.direction, 1000.0, false, &default())?;
-        Some(cursor.snapped(cam_trans.translation() + ray.direction * hit.distance))
+        Some(cursor.snapped(cam_trans.translation() + ray.direction * (hit.distance + 0.2)))
     };
 
     if let Some(pos) = setpos() {

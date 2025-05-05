@@ -106,6 +106,10 @@ impl<T> MediaCollection<T> {
         self.0.get_mut(id).map(|sourced| &mut sourced.content)
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (&Id, &Media<T>)> {
+        self.0.iter()
+    }
+
     pub fn insert(&mut self, id: Id, source: MediaSrc, meta: MediaMeta, media: T) {
         self.0.insert(
             id,
