@@ -7,7 +7,7 @@ use bevy::{input::common_conditions::input_just_pressed, prelude::*};
 use binds::{Binding, InputBindingSystem};
 use view::{Gimbal, GimbalPos};
 
-use crate::{editor::update_editor_context, game::GameRules, util::IdGen};
+use crate::{editor::update_editor_context, game::GameRules, id::IdGen};
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AppState {

@@ -3,6 +3,7 @@ mod core;
 mod editor;
 mod experimental;
 mod game;
+mod id;
 mod util;
 
 use avian3d::PhysicsPlugins;

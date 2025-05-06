@@ -25,7 +25,7 @@ use crate::{
         dto::{MediaLibDe, MediaLibSer},
         surface::{Surface, SurfaceHandles},
     },
-    util::{Id, IdGen},
+    id::{Id, IdGen},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -12,7 +12,8 @@ use crate::{
         freelook::FreelookState,
         EditorSystems,
     },
-    util::{Facing3d, Id},
+    id::Id,
+    util::Facing3d,
 };
 
 /// Exists when a position is selected via the spatial cursor.

@@ -27,7 +27,7 @@ use crate::{
         view::TPCameraTo,
     },
     editor::{update_editor_context, EditorContext},
-    util::{Id, IdGen},
+    id::{Id, IdGen},
 };
 
 #[derive(Resource, Serialize, Deserialize, Clone)]

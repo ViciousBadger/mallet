@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core::media::{surface::Surface, MediaCollection, MediaMeta, MediaSrc},
-    util::Id,
+    id::Id,
 };
 
 #[derive(Deserialize)]
