@@ -1,40 +1,54 @@
-#![allow(dead_code)]
-
 mod app_data;
 mod core;
 mod editor;
+mod experimental;
 mod game;
 mod util;
 
 use avian3d::PhysicsPlugins;
 use bevy::prelude::*;
+use clap::{Parser, Subcommand};
 use color_eyre::eyre::Result;
 
 pub const APP_NAME: &str = "Mallet";
 
+#[derive(Parser)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Experiment,
+}
+
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    App::new()
-        .add_plugins((
-            app_data::plugin,
-            DefaultPlugins,
-            PhysicsPlugins::default(),
-            core::plugin,
-            editor::plugin,
-            game::plugin,
-        ))
-        // Only update when there is user input. Should be disabled when in-game
-        //.insert_resource(WinitSettings::desktop_app())
-        .add_systems(PreUpdate, file_drop)
-        //.add_systems(Update, debuggy.run_if(on_timer(Duration::from_secs(1))))
-        .run();
-    Ok(())
-}
+    let cli = Cli::parse();
 
-fn debuggy(q_all_entities: Query<Entity>) {
-    let entities = q_all_entities.iter().len();
-    info!("{} entities", entities);
+    match &cli.command {
+        None => {
+            App::new()
+                .add_plugins((
+                    app_data::plugin,
+                    DefaultPlugins,
+                    PhysicsPlugins::default(),
+                    core::plugin,
+                    editor::plugin,
+                    game::plugin,
+                ))
+                // Only update when there is user input. Should be disabled when in-game
+                //.insert_resource(WinitSettings::desktop_app())
+                .add_systems(PreUpdate, file_drop)
+                .run();
+        }
+        Some(Commands::Experiment) => {
+            experimental::run_playground();
+        }
+    }
+    Ok(())
 }
 
 fn file_drop(mut evr_dnd: EventReader<FileDragAndDrop>) {
