@@ -28,6 +28,7 @@ serde = { version = "1.0.219", features = ["derive"] }
 sled = "0.34.7"
 strum = "0.27.1"
 thiserror = "2.0.12"
+time = "0.3.41"
 ulid = { version = "1.2.1", features = ["serde"] }
 walkdir = "2.5.0"
 wyrand = "0.3.2"
