@@ -59,11 +59,14 @@ struct MapDb {
     backing: Db,
 }
 
-const HIST_KEY: &[u8] = "history".as_bytes();
+const HIST_KEY: &[u8] = &[0];
+const STATE_KEY: &[u8] = &[1];
 
 impl MapDb {
     pub fn new_temp() -> sled::Result<MapDb> {
-        let db = Config::new().temporary(true).open()?;
+        //let db = Config::new().temporary(true).open()?;
+        let db = sled::open("test.db")?;
+        info!("opened");
         Ok(MapDb { backing: db })
     }
 
@@ -72,19 +75,28 @@ impl MapDb {
             self.backing.open_tree(HIST_KEY)?,
         )))
     }
+
+    fn main_state(&self) -> DbResult<MapState> {
+        Ok(MapState(TypedTree::new(self.backing.open_tree(STATE_KEY)?)))
+    }
+
+    fn snapshot_state(&self, id: &Id) -> DbResult<MapState> {
+        let full_key = [STATE_KEY, &id.to_bytes()].concat();
+        Ok(MapState(TypedTree::new(self.backing.open_tree(full_key)?)))
+    }
 }
 
-struct MapHistory(TypedTree<MapHistEntr>);
+struct MapHistory(TypedTree<MapHistoryNode>);
 
 impl MapHistory {
-    pub fn push(&self, id_gen: &mut IdGen, map_hist_entr: MapHistEntr) {
+    pub fn push(&self, id_gen: &mut IdGen, map_hist_entr: MapHistoryNode) {
         let id = id_gen.generate();
         self.0.insert(&id, &map_hist_entr).unwrap();
     }
 }
 
 #[derive(Serialize, Deserialize)]
-struct MapHistEntr {
+struct MapHistoryNode {
     pub parent: u64,
     pub timestamp: i64,
     pub action: MapAction,
@@ -92,13 +104,34 @@ struct MapHistEntr {
 
 #[derive(Serialize, Deserialize)]
 pub enum MapAction {
-    Init,
-    Node {
-        id: u64,
-        type_id: u64,
-        state_before: Option<u64>,
-        state_after: Option<u64>,
+    StateSnapshot(u64),
+    Delta {
+        node_id: u64,
+        node_kind: NodeKind,
+        delta: MapDelta,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum MapDelta {
+    Create { content_key: u64 },
+    Modify { before_key: u64, after_key: u64 },
+    Remove { content_key: u64 },
+}
+
+struct MapState(TypedTree<MapStateNode>);
+
+#[derive(Serialize, Deserialize)]
+struct MapStateNode {
+    pub name: String,
+    pub node_kind: NodeKind,
+    pub content_key: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum NodeKind {
+    Brush = 0,
+    Light = 1,
 }
 
 fn test(mut commands: Commands) {
