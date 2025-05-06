@@ -13,8 +13,8 @@ use bevy::{
     image::{
         ImageAddressMode, ImageLoader, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor,
     },
+    platform::collections::{HashMap, HashSet},
     prelude::*,
-    utils::{HashMap, HashSet},
 };
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use walkdir::WalkDir;
 
 use crate::{
     core::media::{
-        dto::{MediaDe, MediaLibDe, MediaLibSer, MediaSer},
+        dto::{MediaLibDe, MediaLibSer},
         surface::{Surface, SurfaceHandles},
     },
     util::{Id, IdGen},
@@ -265,44 +265,11 @@ fn media_sync(
                     info!("modified: {}", modified.0);
                     Act::NoOp
                 } else {
-                    let clones = diffs
-                        .iter()
-                        .filter(|(id, diff)| diff == &MediaDiff::SameContent);
+                    // let clones = diffs
+                    //     .iter()
+                    //     .filter(|(id, diff)| diff == &MediaDiff::SameContent);
                     Act::NoOp
                 };
-                // } else if let Some(existing) = diffs
-                //     .iter()
-                //     .find(|(_, diff)| diff == &MediaDiff::SameContent)
-                // {
-                // let surf = surfaces.get_mut(&existing.0).unwrap();
-                //
-                // info!(
-                //     "found another with same content. gotta check {:?}..",
-                //     &surf.meta.path
-                // );
-                //
-                // let full_path = src_conf.file_path(&surf.meta.path);
-                // if full_path.exists() {
-                //     info!("we ensured that {:?} still exists!", full_path);
-                //     // duplicate!
-                //     let next_dupe_idx = surfaces
-                //         .iter()
-                //         .filter(|(_, media)| media.meta.hash == meta.hash)
-                //         .map(|(_, media)| media.meta.dupe_idx.map(|id| id + 1).unwrap_or(0))
-                //         .max()
-                //         .unwrap_or(0);
-                //     info!("duplicated: {}, next idx {}", existing.0, next_dupe_idx);
-                //     Act::CreateDupe(next_dupe_idx)
-                // } else {
-                //     // move!
-                //     info!("moved: {}", existing.0);
-                //     surf.meta.path = meta.path.clone();
-                //     Act::NoOp
-                // }
-                //     //surf.asset_server.reload(src_conf.asset_path(media_path));
-                // } else {
-                //     Act::NoOp
-                // };
 
                 if act != Act::NoOp {
                     let meta = if let Act::CreateDupe(dupe_idx) = act {

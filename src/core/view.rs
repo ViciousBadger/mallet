@@ -74,13 +74,14 @@ const PITCH_LIMIT: f32 = 88.0_f32.to_radians();
 fn teleport(
     mut tp_reader: EventReader<TPCameraTo>,
     mut q_gimbal_cam: Query<(&mut Transform, &mut Gimbal)>,
-) {
+) -> Result {
     // TODO: Should take care of transform hiearchy
     if let Some(tp) = tp_reader.read().last() {
-        let (mut cam_t, mut cam_g) = q_gimbal_cam.single_mut();
+        let (mut cam_t, mut cam_g) = q_gimbal_cam.single_mut()?;
         cam_t.translation = tp.pos;
         *cam_g = tp.rot;
     }
+    Ok(())
 }
 
 fn gimbal_mouse_input(
@@ -88,7 +89,7 @@ fn gimbal_mouse_input(
     mut q_gimbal: Query<&mut Gimbal>,
 ) {
     for motion in mouse_motion.read() {
-        if let Ok(mut gimbal) = q_gimbal.get_single_mut() {
+        if let Ok(mut gimbal) = q_gimbal.single_mut() {
             gimbal.pitch_yaw += motion.delta.yx() * 0.0022;
         }
     }
@@ -99,14 +100,14 @@ fn gimbal_binding_input(
     time: Res<Time>,
     mut q_gimbal: Query<&mut Gimbal>,
 ) {
-    if let Ok(mut gimbal) = q_gimbal.get_single_mut() {
+    if let Ok(mut gimbal) = q_gimbal.single_mut() {
         let look_vec = input.look_vec();
         gimbal.pitch_yaw += Vec2::new(-look_vec.y, look_vec.x) * time.delta_secs() * 1.5;
     }
 }
 
 fn gimbal_limit(mut q_gimbal: Query<&mut Gimbal, Changed<Gimbal>>) {
-    if let Ok(mut gimbal) = q_gimbal.get_single_mut() {
+    if let Ok(mut gimbal) = q_gimbal.single_mut() {
         gimbal.pitch_yaw.x = gimbal.pitch_yaw.x.clamp(-PITCH_LIMIT, PITCH_LIMIT);
     }
 }
@@ -133,11 +134,11 @@ fn gimbal_rotation(
 
 #[allow(clippy::type_complexity)]
 fn gimbal_parent_rotation(
-    q_gimbal_changed: Query<(&Gimbal, &Parent), (Changed<Gimbal>, With<GimbalRotatesParent>)>,
+    q_gimbal_changed: Query<(&Gimbal, &ChildOf), (Changed<Gimbal>, With<GimbalRotatesParent>)>,
     mut q_transforms: Query<&mut Transform, Without<GimbalRotatesParent>>, // ensure parallel compability
 ) {
-    for (gimbal, parent) in q_gimbal_changed.iter() {
-        if let Ok(mut parent_transform) = q_transforms.get_mut(parent.get()) {
+    for (gimbal, child_of) in q_gimbal_changed.iter() {
+        if let Ok(mut parent_transform) = q_transforms.get_mut(child_of.parent()) {
             parent_transform.rotation =
                 Quat::from_euler(EulerRot::YXZ, -gimbal.pitch_yaw.y, 0.0, 0.0)
         }

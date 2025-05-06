@@ -129,8 +129,11 @@ impl SpatialCursor {
 #[allow(clippy::type_complexity)]
 fn switch_cursor_mode(
     mode_kind: CursorModeKind,
-) -> impl Fn(Option<Res<SelectedPos>>, Query<&GlobalTransform, With<Camera>>, ResMut<SpatialCursor>)
-{
+) -> impl Fn(
+    Option<Res<SelectedPos>>,
+    Query<&GlobalTransform, With<Camera>>,
+    ResMut<SpatialCursor>,
+) -> Result {
     move |sel_pos, q_camera, mut cursor| {
         cursor.mode = match &mode_kind {
             CursorModeKind::AxisPlane(axis) => {
@@ -153,7 +156,7 @@ fn switch_cursor_mode(
                 origin: sel_pos.or_default(),
             },
             CursorModeKind::ViewPlane => {
-                let cam_transform = q_camera.single();
+                let cam_transform = q_camera.single()?;
                 CursorMode::ViewPlane {
                     dist: if let Some(sel_pos) = sel_pos {
                         cam_transform.translation().distance(**sel_pos)
@@ -164,12 +167,13 @@ fn switch_cursor_mode(
             }
             CursorModeKind::Pick => CursorMode::Pick,
         };
+        Ok(())
     }
 }
 
 fn toggle_snap(mut sel: ResMut<SpatialCursor>, mut sel_changed: EventWriter<SelectionChanged>) {
     sel.snap = !sel.snap;
-    sel_changed.send(SelectionChanged);
+    sel_changed.write(SelectionChanged);
     // TODO: Should the grid offset snap into place when toggling snap? Right now it de-snaps again
     // when snap is disabled.
 }
@@ -180,7 +184,7 @@ fn update_cursor_origin(
     mut cursor: ResMut<SpatialCursor>,
     //mut cursor_changed: EventWriter<SelectionChanged>,
 ) {
-    if let Ok(camera_transform) = q_camera.get_single() {
+    if let Ok(camera_transform) = q_camera.single() {
         cursor.origin = camera_transform.translation().round();
         // let cur_offs = cursor.axis_offset;
         // match cursor_axis.map(|res| res.to_owned().0) {
@@ -229,8 +233,8 @@ fn select_on_axis_plane(
     cursor: Res<SpatialCursor>,
     mut sel_changed: EventWriter<SelectionChanged>,
     mut commands: Commands,
-) {
-    let window = q_window.single();
+) -> Result {
+    let window = q_window.single()?;
     let (axis, offset) = match cursor.mode {
         CursorMode::AxisPlane { axis, offset } => (axis, offset),
         _ => unreachable!(),
@@ -238,7 +242,7 @@ fn select_on_axis_plane(
 
     let setpos = || {
         let mouse_pos = window.cursor_position()?;
-        let (cam, cam_trans) = q_camera.get_single().ok()?;
+        let (cam, cam_trans) = q_camera.single().ok()?;
         let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
         let plane = axis.as_plane();
         let grid_center = axis.as_unit_vec() * offset;
@@ -251,7 +255,9 @@ fn select_on_axis_plane(
     } else {
         commands.remove_resource::<SelectedPos>();
     }
-    sel_changed.send(SelectionChanged);
+    sel_changed.write(SelectionChanged);
+
+    Ok(())
 }
 
 fn select_on_locked_axis(
@@ -267,9 +273,9 @@ fn select_on_locked_axis(
     };
 
     let setpos = || {
-        let window = q_window.get_single().ok()?;
+        let window = q_window.single().ok()?;
         let mouse_pos = window.cursor_position()?;
-        let (cam, cam_trans) = q_camera.get_single().ok()?;
+        let (cam, cam_trans) = q_camera.single().ok()?;
         let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
         let mut towards_cam = origin - cam_trans.translation();
         match axis {
@@ -297,7 +303,7 @@ fn select_on_locked_axis(
     } else {
         commands.remove_resource::<SelectedPos>();
     }
-    sel_changed.send(SelectionChanged);
+    sel_changed.write(SelectionChanged);
 }
 
 fn select_on_view_plane(
@@ -313,9 +319,9 @@ fn select_on_view_plane(
     };
 
     let setpos = || {
-        let window = q_window.get_single().ok()?;
+        let window = q_window.single().ok()?;
         let mouse_pos = window.cursor_position()?;
-        let (cam, cam_trans) = q_camera.get_single().ok()?;
+        let (cam, cam_trans) = q_camera.single().ok()?;
         let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
         Some(cursor.snapped(cam_trans.translation() + ray.direction * dist))
     };
@@ -325,7 +331,7 @@ fn select_on_view_plane(
     } else {
         commands.remove_resource::<SelectedPos>();
     }
-    sel_changed.send(SelectionChanged);
+    sel_changed.write(SelectionChanged);
 }
 
 fn select_by_picking(
@@ -337,9 +343,9 @@ fn select_by_picking(
     mut commands: Commands,
 ) {
     let setpos = || {
-        let window = q_window.get_single().ok()?;
+        let window = q_window.single().ok()?;
         let mouse_pos = window.cursor_position()?;
-        let (cam, cam_trans) = q_camera.get_single().ok()?;
+        let (cam, cam_trans) = q_camera.single().ok()?;
         let ray = cam.viewport_to_world(cam_trans, mouse_pos).ok()?;
 
         let hit = spatial_query.cast_ray(ray.origin, ray.direction, 1000.0, false, &default())?;
@@ -351,7 +357,7 @@ fn select_by_picking(
     } else {
         commands.remove_resource::<SelectedPos>();
     }
-    sel_changed.send(SelectionChanged);
+    sel_changed.write(SelectionChanged);
 }
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -399,7 +405,10 @@ pub fn plugin(app: &mut App) {
     app.insert_gizmo_config(
         SelGridGizmos {},
         GizmoConfig {
-            line_width: 1.5,
+            line: GizmoLineConfig {
+                width: 1.5,
+                ..default()
+            },
             ..default()
         },
     );

@@ -316,7 +316,7 @@ fn insert_map_when_loaded(
 
         match map_result {
             Ok(de_map) => {
-                tp_writer.send(TPCameraTo(de_map.editor_context.camera_pos));
+                tp_writer.write(TPCameraTo(de_map.editor_context.camera_pos));
                 commands.insert_resource(MapSession {
                     save_path: loading_map.path.clone(),
                 });
@@ -347,7 +347,7 @@ fn save_map(map_session: Res<MapSession>, map: Res<Map>, editor_context: Res<Edi
 fn unload_map(q_live_nodes: Query<Entity, With<Id>>, mut commands: Commands) {
     info!("unload map with {} nodes", q_live_nodes.iter().count());
     for entity in q_live_nodes.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
     commands.remove_resource::<Map>();
 }
@@ -463,7 +463,7 @@ fn reflect_map_changes_in_world(
                     let entity_id = *map_lookup
                         .node_to_entity(node_id)
                         .expect("Modified node should already be instantiated in world");
-                    deploy_events.send(DeployMapNode {
+                    deploy_events.write(DeployMapNode {
                         target_entity: entity_id,
                         node: node.clone(),
                     });
@@ -472,7 +472,7 @@ fn reflect_map_changes_in_world(
                 // Add
                 let entity_id = commands.spawn(*node_id).id();
                 map_lookup.insert(*node_id, entity_id);
-                deploy_events.send(DeployMapNode {
+                deploy_events.write(DeployMapNode {
                     target_entity: entity_id,
                     node: node.clone(),
                 });
@@ -487,7 +487,7 @@ fn reflect_map_changes_in_world(
             .collect();
 
         for entity in removed_node_entities {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             map_lookup.remove_by_right(&entity);
         }
     } else {
@@ -495,7 +495,7 @@ fn reflect_map_changes_in_world(
         for (node_id, node) in map.iter() {
             let entity_id = commands.spawn(*node_id).id();
             map_lookup.insert(*node_id, entity_id);
-            deploy_events.send(DeployMapNode {
+            deploy_events.write(DeployMapNode {
                 target_entity: entity_id,
                 node: node.clone(),
             });
@@ -514,7 +514,7 @@ fn deploy_nodes(
 ) {
     for event in deploy_events.read() {
         let mut entity_commands = commands.entity(event.target_entity);
-        entity_commands.despawn_descendants();
+        entity_commands.despawn_related::<Children>();
         // NOTE: When this is applied, the Children component will be gone, so it's important to
         // despawn descendants BEFORE retaining.
         entity_commands.retain::<Id>();
@@ -551,14 +551,12 @@ fn deploy_nodes(
                 ));
 
                 for side in brush.bounds.sides_local() {
-                    commands
-                        .spawn((
-                            Transform::IDENTITY.with_translation(side.pos),
-                            Mesh3d(meshes.add(side.mesh())),
-                            //MeshMaterial3d(materials.add(color)),
-                            MeshMaterial3d(map_assets.default_material.clone()),
-                        ))
-                        .set_parent(event.target_entity);
+                    entity_commands.with_child((
+                        Transform::IDENTITY.with_translation(side.pos),
+                        Mesh3d(meshes.add(side.mesh())),
+                        //MeshMaterial3d(materials.add(color)),
+                        MeshMaterial3d(map_assets.default_material.clone()),
+                    ));
                 }
             }
         }

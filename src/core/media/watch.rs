@@ -1,8 +1,8 @@
 use std::sync::mpsc::Receiver;
 
 use bevy::{
+    platform::collections::{HashMap, HashSet},
     prelude::*,
-    utils::{HashMap, HashSet},
 };
 
 use super::{MediaSources, MediaSrc, MediaSrcConf, MediaSync};

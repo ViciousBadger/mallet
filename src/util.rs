@@ -46,16 +46,18 @@ pub fn enter_state<S: FreelyMutableState>(new_state: S) -> impl Fn(ResMut<NextSt
     }
 }
 
-pub fn grab_mouse(mut q_window: Query<&mut Window, With<PrimaryWindow>>) {
-    let mut window = q_window.single_mut();
+pub fn grab_mouse(mut q_window: Query<&mut Window, With<PrimaryWindow>>) -> Result {
+    let mut window = q_window.single_mut()?;
     window.cursor_options.grab_mode = CursorGrabMode::Locked;
     window.cursor_options.visible = false;
+    Ok(())
 }
 
-pub fn release_mouse(mut q_window: Query<&mut Window, With<PrimaryWindow>>) {
-    let mut window = q_window.single_mut();
+pub fn release_mouse(mut q_window: Query<&mut Window, With<PrimaryWindow>>) -> Result {
+    let mut window = q_window.single_mut()?;
     window.cursor_options.grab_mode = CursorGrabMode::None;
     window.cursor_options.visible = true;
+    Ok(())
 }
 
 pub fn input_just_toggled<T>(input: T) -> impl FnMut(Res<ButtonInput<T>>) -> bool + Clone

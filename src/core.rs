@@ -67,7 +67,7 @@ fn playtest(
     mut next_app_state: ResMut<NextState<AppState>>,
     mut commands: Commands,
 ) {
-    if let Ok((transform, gimbal)) = q_existing_cam.get_single() {
+    if let Ok((transform, gimbal)) = q_existing_cam.single() {
         commands.insert_resource(GameRules {
             spawn: GimbalPos {
                 pos: transform.translation(),

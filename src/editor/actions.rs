@@ -68,7 +68,7 @@ fn end_building_brush_here(
     let bounds = BrushBounds::new(start, end);
 
     if bounds.is_valid() {
-        map_changes.send(MapChange::Add(MapNode::Brush(Brush { bounds })));
+        map_changes.write(MapChange::Add(MapNode::Brush(Brush { bounds })));
         next_editor_action.set(EditorAction::None);
     }
 }
@@ -124,7 +124,7 @@ fn live_brush_resize(
     let resized_brush = Brush {
         bounds: brush.bounds.resized(process.side, **sel_pos),
     };
-    deploy_events.send(DeployMapNode {
+    deploy_events.write(DeployMapNode {
         target_entity: process.brush.entity,
         node: MapNode::Brush(resized_brush),
     });
@@ -144,7 +144,7 @@ fn end_resizing_brush_here(
         panic!("notabrush")
     };
     brush.bounds = resized_bounds;
-    mod_events.send(MapChange::Modify(
+    mod_events.write(MapChange::Modify(
         process.brush.node_id,
         MapNode::Brush(brush),
     ));
@@ -156,7 +156,7 @@ fn resize_brush_cleanup(mut commands: Commands) {
 }
 
 fn remove_node(sel_target: Res<SelectionTargets>, mut mod_events: EventWriter<MapChange>) {
-    mod_events.send(MapChange::Remove(sel_target.focused.node_id));
+    mod_events.write(MapChange::Remove(sel_target.focused.node_id));
 }
 
 fn add_light(sel_pos: Res<SelectedPos>, mut mod_events: EventWriter<MapChange>) {
@@ -167,7 +167,7 @@ fn add_light(sel_pos: Res<SelectedPos>, mut mod_events: EventWriter<MapChange>) 
         intensity: 30000.0,
         range: 20.0,
     };
-    mod_events.send(MapChange::Add(MapNode::Light(light)));
+    mod_events.write(MapChange::Add(MapNode::Light(light)));
 }
 
 pub fn plugin(app: &mut App) {
@@ -175,8 +175,11 @@ pub fn plugin(app: &mut App) {
         .insert_gizmo_config(
             ActionGizmos {},
             GizmoConfig {
-                line_width: 3.0,
-                line_style: GizmoLineStyle::Dotted,
+                line: GizmoLineConfig {
+                    width: 3.0,
+                    style: GizmoLineStyle::Dotted,
+                    ..default()
+                },
                 depth_bias: -0.015,
                 ..default()
             },

@@ -39,23 +39,18 @@ fn init_game(mut commands: Commands, init_conf: Option<Res<GameRules>>) {
     let mut caster_shape = player_coll.clone();
     caster_shape.set_scale(Vec3::ONE * 0.99, 10);
 
-    // player avatar
-    let player = commands
-        .spawn((
-            StateScoped(AppState::InGame),
-            PlayerActor,
-            Transform::from_translation(conf.spawn.pos - Vec3::Y * player_head_height),
-            Visibility::Visible,
-            RigidBody::Kinematic,
-            ShapeCaster::new(caster_shape, Vec3::ZERO, Quat::IDENTITY, Dir3::NEG_Y)
-                .with_max_distance(0.2),
-            player_coll,
-        ))
-        .id();
-
-    // player head
-    commands
-        .spawn((
+    commands.spawn((
+        // Player avatar body
+        StateScoped(AppState::InGame),
+        PlayerActor,
+        Transform::from_translation(conf.spawn.pos - Vec3::Y * player_head_height),
+        Visibility::Visible,
+        RigidBody::Kinematic,
+        ShapeCaster::new(caster_shape, Vec3::ZERO, Quat::IDENTITY, Dir3::NEG_Y)
+            .with_max_distance(0.2),
+        player_coll,
+        children![(
+            // Player head
             Transform::from_xyz(0.0, player_head_height, 0.0),
             Camera3d::default(),
             Projection::Perspective(PerspectiveProjection {
@@ -64,8 +59,8 @@ fn init_game(mut commands: Commands, init_conf: Option<Res<GameRules>>) {
             }),
             conf.spawn.rot,
             GimbalRotatesParent,
-        ))
-        .set_parent(player);
+        )],
+    ));
 }
 
 fn teardown_game(_: Commands) {

@@ -64,13 +64,14 @@ pub fn update_editor_context(
     cursor: Res<SpatialCursor>,
     q_camera: Query<(&GlobalTransform, &Gimbal)>,
     mut commands: Commands,
-) {
-    let (cam_t, cam_g) = q_camera.single();
+) -> Result {
+    let (cam_t, cam_g) = q_camera.single()?;
     let new_context = EditorContext {
         cursor: cursor.clone(),
         camera_pos: GimbalPos::new(cam_t.translation(), *cam_g),
     };
     commands.insert_resource(new_context);
+    Ok(())
 }
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]

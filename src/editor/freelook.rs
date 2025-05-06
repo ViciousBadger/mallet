@@ -38,27 +38,27 @@ pub enum FreelookState {
 }
 
 fn freelook_input(input: Res<Axis<BindingAxis>>, mut q_freelook: Query<&mut Freelook>) {
-    if let Ok(mut freelook) = q_freelook.get_single_mut() {
+    if let Ok(mut freelook) = q_freelook.single_mut() {
         freelook.target_move = input.movement_vec();
     }
 }
 
 fn modify_freelook_speed(change: i32) -> impl Fn(Query<&mut Freelook>) {
     move |mut q_freelook| {
-        if let Ok(mut freelook) = q_freelook.get_single_mut() {
+        if let Ok(mut freelook) = q_freelook.single_mut() {
             freelook.speed = (freelook.speed + change).clamp(1, 10);
         }
     }
 }
 
 fn freelook_input_reset(mut q_freelook: Query<&mut Freelook>) {
-    if let Ok(mut freelook) = q_freelook.get_single_mut() {
+    if let Ok(mut freelook) = q_freelook.single_mut() {
         freelook.target_move = Vec3::ZERO;
     }
 }
 
 fn freelook_movement(mut q_freelook: Query<(&mut Freelook, &mut Transform)>, time: Res<Time>) {
-    if let Ok((mut freelook, mut transform)) = q_freelook.get_single_mut() {
+    if let Ok((mut freelook, mut transform)) = q_freelook.single_mut() {
         let xz_movement = freelook.target_move.xz().rotate(Vec2::from_angle(
             -transform.rotation.to_euler(EulerRot::YXZ).0,
         ));
@@ -77,13 +77,18 @@ fn freelook_movement(mut q_freelook: Query<(&mut Freelook, &mut Transform)>, tim
     }
 }
 
-fn tp_to_selection(sel_pos: Res<SelectedPos>, mut q_camera: Query<&mut Transform, With<Camera>>) {
+fn tp_to_selection(
+    sel_pos: Res<SelectedPos>,
+    mut q_camera: Query<&mut Transform, With<Camera>>,
+) -> Result {
     //TODO: use "view"'s tp event
-    let mut cam_trans = q_camera.single_mut();
+    let mut cam_trans = q_camera.single_mut()?;
 
     let dist = cam_trans.translation.distance(**sel_pos);
     let moved = cam_trans.translation.move_towards(**sel_pos, dist - 5.0);
     cam_trans.translation = moved;
+
+    Ok(())
 }
 
 pub fn plugin(app: &mut App) {

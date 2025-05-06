@@ -1,4 +1,4 @@
-use avian3d::prelude::{narrow_phase::NarrowPhaseSet, *};
+use avian3d::prelude::*;
 use bevy::{math::vec2, prelude::*};
 
 use crate::{
@@ -25,10 +25,10 @@ fn player_input(
 ) {
     let movement = axis_input.movement_vec().xz();
     if movement != Vec2::ZERO {
-        movement_event_writer.send(MovementAction::Move(movement));
+        movement_event_writer.write(MovementAction::Move(movement));
     }
     if button_input.just_pressed(Binding::Jump) {
-        movement_event_writer.send(MovementAction::Jump);
+        movement_event_writer.write(MovementAction::Jump);
     }
 }
 
@@ -127,11 +127,11 @@ fn apply_movement_damping(
 /// and predict collisions using speculative contacts.
 #[allow(clippy::type_complexity)]
 fn actor_collisions(
-    collisions: Res<Collisions>,
+    collisions: Collisions,
     bodies: Query<&RigidBody>,
-    collider_parents: Query<&ColliderParent, Without<Sensor>>,
+    collider_rbs: Query<&ColliderOf, Without<Sensor>>,
     mut character_controllers: Query<
-        (&mut Position, &Rotation, &mut LinearVelocity),
+        (&mut Position, &mut LinearVelocity),
         (With<RigidBody>, With<PlayerActor>),
     >,
     time: Res<Time>,
@@ -141,8 +141,8 @@ fn actor_collisions(
     // Iterate through collisions and move the kinematic body to resolve penetration
     for contacts in collisions.iter() {
         // Get the rigid body entities of the colliders (colliders could be children)
-        let Ok([collider_parent1, collider_parent2]) =
-            collider_parents.get_many([contacts.entity1, contacts.entity2])
+        let Ok([&ColliderOf { body: rb1 }, &ColliderOf { body: rb2 }]) =
+            collider_rbs.get_many([contacts.collider1, contacts.collider2])
         else {
             continue;
         };
@@ -154,20 +154,16 @@ fn actor_collisions(
         let character_rb: RigidBody;
         let is_other_dynamic: bool;
 
-        let (mut position, rotation, mut linear_velocity) =
-            if let Ok(character) = character_controllers.get_mut(collider_parent1.get()) {
+        let (mut position, mut linear_velocity) =
+            if let Ok(character) = character_controllers.get_mut(rb1) {
                 is_first = true;
-                character_rb = *bodies.get(collider_parent1.get()).unwrap();
-                is_other_dynamic = bodies
-                    .get(collider_parent2.get())
-                    .is_ok_and(|rb| rb.is_dynamic());
+                character_rb = *bodies.get(rb1).unwrap();
+                is_other_dynamic = bodies.get(rb2).is_ok_and(|rb| rb.is_dynamic());
                 character
-            } else if let Ok(character) = character_controllers.get_mut(collider_parent2.get()) {
+            } else if let Ok(character) = character_controllers.get_mut(rb2) {
                 is_first = false;
-                character_rb = *bodies.get(collider_parent2.get()).unwrap();
-                is_other_dynamic = bodies
-                    .get(collider_parent1.get())
-                    .is_ok_and(|rb| rb.is_dynamic());
+                character_rb = *bodies.get(rb2).unwrap();
+                is_other_dynamic = bodies.get(rb1).is_ok_and(|rb| rb.is_dynamic());
                 character
             } else {
                 continue;
@@ -182,15 +178,15 @@ fn actor_collisions(
         // Each contact in a single manifold shares the same contact normal.
         for manifold in contacts.manifolds.iter() {
             let normal = if is_first {
-                -manifold.global_normal1(rotation)
+                -manifold.normal
             } else {
-                -manifold.global_normal2(rotation)
+                manifold.normal
             };
 
             let mut deepest_penetration = f32::MIN;
 
             // Solve each penetrating contact in the manifold.
-            for contact in manifold.contacts.iter() {
+            for contact in manifold.points.iter() {
                 if contact.penetration > 0.0 {
                     position.0 += normal * contact.penetration;
                 }

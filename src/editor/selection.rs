@@ -260,7 +260,10 @@ pub fn plugin(app: &mut App) {
     .insert_gizmo_config(
         SelTargetGizmos {},
         GizmoConfig {
-            line_width: 4.0,
+            line: GizmoLineConfig {
+                width: 4.0,
+                ..default()
+            },
             depth_bias: -0.999,
             ..default()
         },
@@ -268,7 +271,10 @@ pub fn plugin(app: &mut App) {
     .insert_gizmo_config(
         SelHighlightGizmos {},
         GizmoConfig {
-            line_width: 6.0,
+            line: GizmoLineConfig {
+                width: 6.0,
+                ..default()
+            },
             depth_bias: -1.0,
             ..default()
         },

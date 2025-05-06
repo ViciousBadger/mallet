@@ -1,4 +1,4 @@
-use bevy::{color::palettes::css, ecs::entity, prelude::*, ui::BackgroundColor, utils::HashSet};
+use bevy::{color::palettes::css, platform::collections::HashSet, prelude::*, ui::BackgroundColor};
 
 use crate::core::{
     media::{surface::Surface, MediaCollection},
@@ -36,55 +36,28 @@ fn clicktest(
 pub struct SurfaceList;
 
 fn init_ui(mut commands: Commands) {
-    commands
-        .spawn((
-            PreventClicks,
-            StateScoped(AppState::InEditor),
-            Interaction::default(),
-            Node {
-                display: Display::Flex,
-                flex_direction: FlexDirection::Column,
-                width: Val::Px(300.0),
-                height: Val::Percent(100.0),
-                padding: UiRect {
-                    left: Val::Px(16.),
-                    right: Val::Px(16.),
-                    top: Val::Px(16.),
-                    bottom: Val::Px(16.),
-                },
-                align_items: AlignItems::Start,
-                justify_content: JustifyContent::Start,
-                ..default()
+    commands.spawn((
+        PreventClicks,
+        StateScoped(AppState::InEditor),
+        Interaction::default(),
+        Node {
+            display: Display::Flex,
+            flex_direction: FlexDirection::Column,
+            width: Val::Px(300.0),
+            height: Val::Percent(100.0),
+            padding: UiRect {
+                left: Val::Px(16.),
+                right: Val::Px(16.),
+                top: Val::Px(16.),
+                bottom: Val::Px(16.),
             },
-            BackgroundColor(Color::Srgba(css::BLACK)),
-            SurfaceList,
-        ))
-        .with_children(|builder| {
-            // builder.spawn((
-            //     Node {
-            //         padding: UiRect {
-            //             left: Val::Px(8.),
-            //             right: Val::Px(8.),
-            //             top: Val::Px(8.),
-            //             bottom: Val::Px(8.),
-            //         },
-            //         ..default()
-            //     }, // font?
-            //     Text::new("hello world!!!!"),
-            // ));
-            // builder.spawn((
-            //     Node {
-            //         padding: UiRect {
-            //             left: Val::Px(8.),
-            //             right: Val::Px(8.),
-            //             top: Val::Px(8.),
-            //             bottom: Val::Px(8.),
-            //         },
-            //         ..default()
-            //     }, // font?
-            //     Text::new("hello world!!!!"),
-            // ));
-        });
+            align_items: AlignItems::Start,
+            justify_content: JustifyContent::Start,
+            ..default()
+        },
+        BackgroundColor(Color::Srgba(css::BLACK)),
+        SurfaceList,
+    ));
 }
 
 fn update_surf_list(
@@ -94,8 +67,7 @@ fn update_surf_list(
 ) {
     for list_entity in q_lists.iter() {
         let mut entity_cmds = commands.entity(list_entity);
-        entity_cmds.despawn_descendants();
-
+        entity_cmds.despawn_related::<Children>();
         entity_cmds.with_children(|builder| {
             for (_id, surface) in surfaces.iter() {
                 builder

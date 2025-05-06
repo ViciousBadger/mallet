@@ -1,6 +1,6 @@
-use bevy::input::mouse::MouseWheel;
 use bevy::input::InputSystem;
-use bevy::{prelude::*, utils::HashMap};
+use bevy::prelude::*;
+use bevy::{input::mouse::MouseWheel, platform::collections::HashMap};
 
 use crate::editor::ui::ClickBlocker;
 

@@ -3,15 +3,12 @@ use bevy::{
     prelude::*,
     render::mesh::{
         Indices,
-        PrimitiveTopology::{self, TriangleList},
+        PrimitiveTopology::{self},
     },
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    core::map::{DeployMapNode, MapAssets, MapNode},
-    util::{Facing3d, Id},
-};
+use crate::util::Facing3d;
 
 #[derive(Component, Serialize, Deserialize, Clone, PartialEq)]
 #[require(Visibility, Transform)]
@@ -164,19 +161,19 @@ impl MeshBuilder for BrushSideMeshBuilder {
     }
 }
 
-pub fn deploy_brushes(
-    map_assets: Res<MapAssets>,
-    q_brushes: Query<(&Id, &Brush)>,
-    mut deploy_events: EventReader<DeployMapNode>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-) {
-    // TODO: insert the "inner" component of the mapnode before deploy
-    // (source of truth = component) ??!???!?! confuse
-    for event in deploy_events.read() {
-        if let Ok((id, brush)) = q_brushes.get(event.target_entity) {
-            info!("yee");
-        }
-        //if let MapNode::Brush(brush) = &event.node {}
-    }
-}
+// pub fn deploy_brushes(
+//     map_assets: Res<MapAssets>,
+//     q_brushes: Query<(&Id, &Brush)>,
+//     mut deploy_events: EventReader<DeployMapNode>,
+//     mut commands: Commands,
+//     mut meshes: ResMut<Assets<Mesh>>,
+// ) {
+//     // TODO: insert the "inner" component of the mapnode before deploy
+//     // (source of truth = component) ??!???!?! confuse
+//     for event in deploy_events.read() {
+//         if let Ok((id, brush)) = q_brushes.get(event.target_entity) {
+//             info!("yee");
+//         }
+//         //if let MapNode::Brush(brush) = &event.node {}
+//     }
+// }
