@@ -1,10 +1,18 @@
-use bevy::{input::common_conditions::input_just_pressed, prelude::*};
-use serde::{Deserialize, Serialize};
+use bevy::{
+    input::common_conditions::{input_just_pressed, input_pressed},
+    prelude::*,
+};
+use redb::{Database, TableDefinition, TypeName};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::{Config, Db};
 use thiserror::Error;
+use ulid::Ulid;
 
 use crate::{
-    core::map::brush::{Brush, BrushBounds},
+    core::map::{
+        brush::{Brush, BrushBounds},
+        light::{Light, LightType},
+    },
     id::{Id, IdGen},
 };
 
@@ -57,54 +65,57 @@ type TypedTree<T> = typed_sled::Tree<Id, T>;
 //     }
 // }
 
-#[derive(Resource)]
+#[derive(Resource, Deref)]
 struct MapDb {
-    backing: Db,
+    backing: redb::Database,
 }
 
-const HIST_KEY: &str = "hist";
-const STATE_KEY: &str = "node_state";
-const CONTENT_KEY: &str = "node_content";
+const HIST_TABLE: TableDefinition<Id, Card<MapHistoryNode>> = TableDefinition::new("history");
+const STATE_TABLE: TableDefinition<Id, Card<MapStateNode>> = TableDefinition::new("node_state");
+const CONTENT_TABLE_BRUSH: TableDefinition<Id, Card<Brush>> = TableDefinition::new("content_brush");
+const CONTENT_TABLE_LIGHT: TableDefinition<Id, Card<Light>> = TableDefinition::new("content_light");
 
 impl MapDb {
-    pub fn new_temp() -> sled::Result<MapDb> {
+    pub fn new_temp() -> MapDb {
         // let db = Config::new().temporary(true).open()?;
-        let db = Config::new()
-            .path("test.db")
-            .use_compression(false)
-            .open()?;
-        // let db = sled::open("test.db")?;
-        info!("opened");
-        Ok(MapDb { backing: db })
+        // let db = Config::new()
+        //     .path("test.db")
+        //     .use_compression(false)
+        //     .open()?;
+        // // let db = sled::open("test.db")?;
+        // info!("opened");
+        // Ok(MapDb { backing: db })
+        MapDb {
+            backing: Database::builder().create("test.db").unwrap(),
+        }
     }
 
-    fn history(&self) -> TypedTree<MapHistoryNode> {
-        TypedTree::open(&self.backing, HIST_KEY)
-    }
+    // fn history(&self) -> TypedTree<MapHistoryNode> {
+    //     TypedTree::open(&self.backing, HIST_KEY)
+    // }
+    //
+    // fn main_state(&self) -> TypedTree<MapStateNode> {
+    //     TypedTree::open(&self.backing, STATE_KEY)
+    // }
+    //
+    // fn snapshot_state(&self, id: &Id) -> TypedTree<MapStateNode> {
+    //     let full_key = [STATE_KEY, &id.to_string()].concat();
+    //     TypedTree::open(&self.backing, full_key)
+    // }
 
-    fn main_state(&self) -> TypedTree<MapStateNode> {
-        TypedTree::open(&self.backing, STATE_KEY)
-    }
-
-    fn snapshot_state(&self, id: &Id) -> TypedTree<MapStateNode> {
-        let full_key = [STATE_KEY, &id.to_string()].concat();
-        TypedTree::open(&self.backing, full_key)
-    }
-
-    /// Uses the same tree for all content types, it's up to the caller to ensure the correct type is being deserialized.
-    fn node_content<T>(&self) -> TypedTree<T> {
-        TypedTree::open(&self.backing, CONTENT_KEY)
-    }
+    // fn node_content<T>(&self) -> TypedTree<T> {
+    //     TypedTree::open(&self.backing, CONTENT_KEY)
+    // }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct MapHistoryNode {
     pub parent: Option<Id>,
     pub timestamp: i64,
     pub action: MapAction,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum MapAction {
     StateSnapshot(Id),
     Delta {
@@ -114,21 +125,21 @@ pub enum MapAction {
     },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum MapDelta {
     Create { content_key: Id },
     Modify { before_key: Id, after_key: Id },
     Remove { content_key: Id },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct MapStateNode {
     pub name: String,
     pub node_kind: NodeKind,
     pub content_key: Id,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum NodeKind {
     Brush = 0,
@@ -136,76 +147,179 @@ pub enum NodeKind {
 }
 
 fn new_test_map(mut commands: Commands) {
-    let map = MapDb::new_temp().unwrap();
+    let map = MapDb::new_temp();
     commands.insert_resource(map);
 }
 
 fn flush_db(map_db: Res<MapDb>) {
     // Flushes the main Tree which is always open afaik.
     // Other trees are flushed after they are dropped in each system :)
-    map_db.backing.flush().unwrap();
+    //map_db.backing.flush().unwrap();
+}
+
+impl redb::Value for Id {
+    type SelfType<'a>
+        = Id
+    where
+        Self: 'a;
+
+    type AsBytes<'a>
+        = [u8; 16]
+    where
+        Self: 'a;
+
+    fn fixed_width() -> Option<usize> {
+        u128::fixed_width()
+    }
+
+    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
+    where
+        Self: 'a,
+    {
+        Id(Ulid::from_bytes(data.try_into().unwrap()))
+    }
+
+    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+    where
+        Self: 'b,
+    {
+        value.to_bytes()
+    }
+
+    fn type_name() -> TypeName {
+        TypeName::new("Id")
+    }
+}
+
+impl redb::Key for Id {
+    fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
+        data1.cmp(data2)
+    }
+}
+
+#[derive(Debug)]
+struct Card<T>(pub T);
+
+impl<T> redb::Value for Card<T>
+where
+    T: std::fmt::Debug + Serialize + DeserializeOwned,
+{
+    type SelfType<'a>
+        = T
+    where
+        Self: 'a;
+
+    type AsBytes<'a>
+        = Vec<u8>
+    where
+        Self: 'a;
+
+    fn fixed_width() -> Option<usize> {
+        None
+    }
+
+    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
+    where
+        Self: 'a,
+    {
+        postcard::from_bytes(data).unwrap()
+    }
+
+    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+    where
+        Self: 'b,
+    {
+        postcard::to_stdvec(value).unwrap()
+    }
+
+    fn type_name() -> TypeName {
+        TypeName::new(&format!("Card<{}>", std::any::type_name::<T>()))
+    }
 }
 
 fn push_test(map_db: Res<MapDb>, mut id_gen: ResMut<IdGen>) -> Result {
-    let hist = map_db.history();
-
     let new_node_id = id_gen.generate();
     let new_node_kind = NodeKind::Brush;
 
-    // Insert the node content
-    let brush_content = map_db.node_content::<Brush>();
-    let new_node_content_id = id_gen.generate();
+    let txn = map_db.begin_write()?;
+    {
+        // Insert the node content
+        // let brush_content = map_db.node_content::<Brush>();
+        let mut brush_content = txn.open_table(CONTENT_TABLE_BRUSH)?;
 
-    let new_brush = Brush {
-        bounds: BrushBounds {
-            start: Vec3::NEG_ONE,
-            end: Vec3::ONE,
-        },
-    };
+        let new_node_content_id = id_gen.generate();
 
-    brush_content.insert(&new_node_content_id, &new_brush)?;
-
-    // Create history entry
-    let new_hist_id = id_gen.generate();
-    let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
-
-    let new_node = MapHistoryNode {
-        parent: None,
-        timestamp,
-        action: MapAction::Delta {
-            node_id: new_node_id,
-            node_kind: new_node_kind,
-            delta: MapDelta::Create {
-                content_key: new_node_content_id,
+        let new_brush = Brush {
+            bounds: BrushBounds {
+                start: Vec3::NEG_ONE,
+                end: Vec3::ONE,
             },
-        },
-    };
-    hist.insert(&new_hist_id, &new_node)?;
+        };
 
-    // Create state entry in main state
-    // Should probably happen in a separate system that applies history entries.
-    // also, needs to be propagated to the game world.
-    let state = map_db.main_state();
-    let new_state_node = MapStateNode {
-        name: "a brush".to_string(),
-        node_kind: new_node_kind,
-        content_key: new_node_content_id,
-    };
-    state.insert(&new_node_id, &new_state_node)?;
+        brush_content.insert(&new_node_content_id, &new_brush)?;
 
-    info!("yey done!");
+        let mut light_content = txn.open_table(CONTENT_TABLE_LIGHT)?;
+        let new_light_content_id = id_gen.generate();
+        light_content.insert(
+            &new_light_content_id,
+            &Light {
+                position: Vec3::ZERO,
+                light_type: LightType::Point,
+                color: Color::srgb(1.0, 0.0, 0.0),
+                intensity: 1000.,
+                range: 10.,
+            },
+        )?;
+
+        // Create history entry
+
+        //let hist = map_db.history();
+        let new_hist_id = id_gen.generate();
+        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
+
+        let new_node = MapHistoryNode {
+            parent: None,
+            timestamp,
+            action: MapAction::Delta {
+                node_id: new_node_id,
+                node_kind: new_node_kind,
+                delta: MapDelta::Create {
+                    content_key: new_node_content_id,
+                },
+            },
+        };
+
+        let mut hist = txn.open_table(HIST_TABLE)?;
+        hist.insert(&new_hist_id, &new_node)?;
+
+        // Create state entry in main state
+        // Should probably happen in a separate system that applies history entries.
+        // also, needs to be propagated to the game world.
+        //let state = map_db.main_state();
+        let mut state = txn.open_table(STATE_TABLE)?;
+        let new_state_node = MapStateNode {
+            name: "a brush".to_string(),
+            node_kind: new_node_kind,
+            content_key: new_node_content_id,
+        };
+        state.insert(&new_node_id, &new_state_node)?;
+
+        info!("yey done!");
+    }
+
+    txn.commit()?;
 
     Ok(())
 }
 
 fn debuggy(map_db: Res<MapDb>) -> Result {
-    let tree_names: Vec<String> = map_db
-        .backing
-        .tree_names()
-        .into_iter()
-        .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap_or("invalid".to_string()))
-        .collect();
-    dbg!(&tree_names);
+    // let tree_names: Vec<String> = map_db
+    //     .backing
+    //     .tree_names()
+    //     .into_iter()
+    //     .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap_or("invalid".to_string()))
+    //     .collect();
+    // dbg!(&tree_names);
     Ok(())
 }
 
@@ -215,7 +329,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            push_test.run_if(input_just_pressed(KeyCode::KeyF)),
+            push_test.run_if(input_pressed(KeyCode::KeyF)),
             debuggy.run_if(input_just_pressed(KeyCode::KeyD)),
         ),
     );

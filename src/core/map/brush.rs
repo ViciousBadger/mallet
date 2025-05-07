@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::util::Facing3d;
 
-#[derive(Component, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[require(Visibility, Transform)]
 pub struct Brush {
     pub bounds: BrushBounds,
