@@ -71,9 +71,7 @@ impl MapDb {
     }
 
     fn history(&self) -> DbResult<MapHistory> {
-        Ok(MapHistory(TypedTree::new(
-            self.backing.open_tree(HIST_KEY)?,
-        )))
+        Ok(MapHistory::new(self.backing.open_tree(HIST_KEY)?))
     }
 
     fn main_state(&self) -> DbResult<MapState> {
@@ -86,12 +84,20 @@ impl MapDb {
     }
 }
 
-struct MapHistory(TypedTree<MapHistoryNode>);
+struct MapHistory {
+    tree: TypedTree<MapHistoryNode>,
+}
 
 impl MapHistory {
+    pub fn new(inner: Tree) -> Self {
+        Self {
+            tree: TypedTree::new(inner),
+        }
+    }
+
     pub fn push(&self, id_gen: &mut IdGen, map_hist_entr: MapHistoryNode) {
         let id = id_gen.generate();
-        self.0.insert(&id, &map_hist_entr).unwrap();
+        self.tree.insert(&id, &map_hist_entr).unwrap();
     }
 }
 
