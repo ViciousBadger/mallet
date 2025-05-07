@@ -1,11 +1,6 @@
-use bevy::{
-    input::common_conditions::{input_just_pressed, input_pressed},
-    prelude::*,
-};
+use bevy::{input::common_conditions::input_pressed, prelude::*};
 use redb::{Database, TableDefinition, TypeName};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use sled::{Config, Db};
-use thiserror::Error;
 use ulid::Ulid;
 
 use crate::{
@@ -15,55 +10,6 @@ use crate::{
     },
     id::{Id, IdGen},
 };
-
-type DbResult<T> = Result<T, DbError>;
-
-#[derive(Error, Debug)]
-enum DbError {
-    #[error("serialization/deserialization error")]
-    Serialization(#[from] postcard::Error),
-    #[error("database error")]
-    Database(#[from] sled::Error),
-}
-
-type TypedTree<T> = typed_sled::Tree<Id, T>;
-
-// struct TypedTree<T> {
-//     inner: Tree,
-//     phantom_data: PhantomData<T>,
-// }
-//
-// impl<T> TypedTree<T> {
-//     pub fn new(inner: Tree) -> Self {
-//         Self {
-//             inner,
-//             phantom_data: PhantomData,
-//         }
-//     }
-// }
-
-// impl<T> TypedTree<T>
-// where
-//     T: Serialize + DeserializeOwned,
-// {
-//     pub fn insert(&self, key: &Id, value: &T) -> DbResult<()> {
-//         let serialized: Vec<u8> = postcard::to_stdvec::<T>(value)?;
-//         self.inner.insert(key.to_bytes(), serialized)?;
-//         Ok(())
-//     }
-//
-//     pub fn get(&self, key: &Id) -> DbResult<Option<T>> {
-//         if let Some(result) = self.inner.get(key.to_bytes())? {
-//             Ok(postcard::from_bytes(&result)?)
-//         } else {
-//             Ok(None)
-//         }
-//     }
-//
-//     pub fn delete(&self, key: &Id) -> DbResult<bool> {
-//         Ok(self.inner.remove(key.to_bytes())?.is_some())
-//     }
-// }
 
 #[derive(Resource, Deref)]
 struct MapDb {
@@ -77,35 +23,10 @@ const CONTENT_TABLE_LIGHT: TableDefinition<Id, Card<Light>> = TableDefinition::n
 
 impl MapDb {
     pub fn new_temp() -> MapDb {
-        // let db = Config::new().temporary(true).open()?;
-        // let db = Config::new()
-        //     .path("test.db")
-        //     .use_compression(false)
-        //     .open()?;
-        // // let db = sled::open("test.db")?;
-        // info!("opened");
-        // Ok(MapDb { backing: db })
         MapDb {
             backing: Database::builder().create("test.db").unwrap(),
         }
     }
-
-    // fn history(&self) -> TypedTree<MapHistoryNode> {
-    //     TypedTree::open(&self.backing, HIST_KEY)
-    // }
-    //
-    // fn main_state(&self) -> TypedTree<MapStateNode> {
-    //     TypedTree::open(&self.backing, STATE_KEY)
-    // }
-    //
-    // fn snapshot_state(&self, id: &Id) -> TypedTree<MapStateNode> {
-    //     let full_key = [STATE_KEY, &id.to_string()].concat();
-    //     TypedTree::open(&self.backing, full_key)
-    // }
-
-    // fn node_content<T>(&self) -> TypedTree<T> {
-    //     TypedTree::open(&self.backing, CONTENT_KEY)
-    // }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -149,12 +70,6 @@ pub enum NodeKind {
 fn new_test_map(mut commands: Commands) {
     let map = MapDb::new_temp();
     commands.insert_resource(map);
-}
-
-fn flush_db(map_db: Res<MapDb>) {
-    // Flushes the main Tree which is always open afaik.
-    // Other trees are flushed after they are dropped in each system :)
-    //map_db.backing.flush().unwrap();
 }
 
 impl redb::Value for Id {
@@ -244,7 +159,6 @@ fn push_test(map_db: Res<MapDb>, mut id_gen: ResMut<IdGen>) -> Result {
     let txn = map_db.begin_write()?;
     {
         // Insert the node content
-        // let brush_content = map_db.node_content::<Brush>();
         let mut brush_content = txn.open_table(CONTENT_TABLE_BRUSH)?;
 
         let new_node_content_id = id_gen.generate();
@@ -272,8 +186,6 @@ fn push_test(map_db: Res<MapDb>, mut id_gen: ResMut<IdGen>) -> Result {
         )?;
 
         // Create history entry
-
-        //let hist = map_db.history();
         let new_hist_id = id_gen.generate();
         let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
 
@@ -295,7 +207,6 @@ fn push_test(map_db: Res<MapDb>, mut id_gen: ResMut<IdGen>) -> Result {
         // Create state entry in main state
         // Should probably happen in a separate system that applies history entries.
         // also, needs to be propagated to the game world.
-        //let state = map_db.main_state();
         let mut state = txn.open_table(STATE_TABLE)?;
         let new_state_node = MapStateNode {
             name: "a brush".to_string(),
@@ -312,26 +223,8 @@ fn push_test(map_db: Res<MapDb>, mut id_gen: ResMut<IdGen>) -> Result {
     Ok(())
 }
 
-fn debuggy(map_db: Res<MapDb>) -> Result {
-    // let tree_names: Vec<String> = map_db
-    //     .backing
-    //     .tree_names()
-    //     .into_iter()
-    //     .map(|bytes| String::from_utf8(bytes.to_vec()).unwrap_or("invalid".to_string()))
-    //     .collect();
-    // dbg!(&tree_names);
-    Ok(())
-}
-
 pub fn plugin(app: &mut App) {
     app.init_resource::<IdGen>();
     app.add_systems(Startup, new_test_map);
-    app.add_systems(
-        Update,
-        (
-            push_test.run_if(input_pressed(KeyCode::KeyF)),
-            debuggy.run_if(input_just_pressed(KeyCode::KeyD)),
-        ),
-    );
-    app.add_systems(Last, flush_db.run_if(on_event::<AppExit>));
+    app.add_systems(Update, (push_test.run_if(input_pressed(KeyCode::KeyF)),));
 }
