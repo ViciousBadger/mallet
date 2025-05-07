@@ -1,4 +1,4 @@
-mod sled_backed_map;
+mod map;
 
 use bevy::prelude::*;
 
@@ -11,5 +11,5 @@ pub fn run_playground() {
 }
 
 fn plugin(app: &mut App) {
-    app.add_plugins(sled_backed_map::plugin);
+    app.add_plugins(map::plugin);
 }
