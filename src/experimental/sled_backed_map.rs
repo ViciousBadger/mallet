@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use bevy::{input::common_conditions::input_pressed, prelude::*};
 use redb::{Database, TableDefinition, TypeName};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -113,8 +115,9 @@ impl redb::Key for Id {
 }
 
 #[derive(Debug)]
-struct Card<T>(pub T);
-
+struct Card<T> {
+    marker: PhantomData<T>,
+}
 impl<T> redb::Value for Card<T>
 where
     T: std::fmt::Debug + Serialize + DeserializeOwned,
