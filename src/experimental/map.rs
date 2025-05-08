@@ -84,8 +84,8 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
             timestamp: history::new_timestamp(),
             parent_key: Some(meta.hist_key),
             child_keys: Vec::default(),
-            change: Change::Delta {
-                element_id: new_elem_id,
+            change: Change::Element {
+                key: new_elem_id,
                 delta: Delta::Create {
                     content_key: new_elem_content_id,
                     element: new_elem.clone(),
@@ -111,7 +111,7 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
 #[derive(Event)]
 pub enum Commit {
     Create {
-        element: Element,
+        name: String,
         content: ErasedContent,
     },
     Rename {
@@ -119,8 +119,8 @@ pub enum Commit {
         new_name: String,
     },
     Modify {
-        element: Element,
-        content: ErasedContent,
+        element_key: Id,
+        new_content: ErasedContent,
     },
     Remove {
         element_key: Id,
@@ -134,22 +134,50 @@ fn commit_to_map(
 ) -> Result {
     for commit in commits.read() {
         match commit {
-            Commit::Create { element, content } => {
+            Commit::Create { name, content } => {
                 let tx = map_db.begin_write()?;
                 {
                     // Insert the content
-                    let new_content_id = id_gen.generate();
+                    let new_content_key = id_gen.generate();
                     match content.role() {
                         ElementRole::Brush => {
                             let brush: &Brush = content.downcast_ref()?;
                             let mut tbl_brushes = tx.open_table(elements::CONTENT_TABLE_BRUSH)?;
-                            tbl_brushes.insert(new_content_id, brush)?;
+                            tbl_brushes.insert(new_content_key, brush)?;
                         }
                         ElementRole::Light => todo!(),
                     }
 
+                    // Construct the element using content key
+                    let new_elem_key = id_gen.generate();
+                    let new_elem = Element {
+                        name: name.clone(),
+                        role: content.role(),
+                        content_key: new_content_key,
+                    };
+
                     // Insert the history entry
-                    let new_elem_id = id_gen.generate();
+                    let mut tbl_hist = tx.open_table(history::HIST_TABLE)?;
+                    let tbl_meta = tx.open_table(META_TABLE)?;
+                    let meta = tbl_meta.get(())?;
+                    let prev_hist_key = meta.map(|guard| guard.value().hist_key);
+
+                    let new_hist_key = id_gen.generate();
+                    tbl_hist.insert(
+                        new_hist_key,
+                        HistNode {
+                            timestamp: history::new_timestamp(),
+                            parent_key: prev_hist_key,
+                            child_keys: Vec::new(),
+                            change: Change::Element {
+                                key: new_elem_key,
+                                delta: Delta::Create {
+                                    element: new_elem,
+                                    content_key: new_content_key,
+                                },
+                            },
+                        },
+                    )?;
                 }
                 tx.commit()?;
             }
@@ -157,7 +185,10 @@ fn commit_to_map(
                 element_key,
                 new_name,
             } => todo!(),
-            Commit::Modify { element, content } => todo!(),
+            Commit::Modify {
+                element,
+                new_content: content,
+            } => todo!(),
             Commit::Remove { element_key } => todo!(),
         }
     }

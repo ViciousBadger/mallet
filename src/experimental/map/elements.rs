@@ -55,6 +55,7 @@ impl ElementContent for Light {
 #[error("asdf")]
 pub struct ContentDowncastFail;
 
+#[derive(Deref)]
 pub struct ErasedContent {
     inner: Box<dyn ElementContent>,
 }

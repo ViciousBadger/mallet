@@ -23,7 +23,7 @@ pub fn new_timestamp() -> i64 {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Change {
     InitMap,
-    Delta { element_id: Id, delta: Delta },
+    Element { key: Id, delta: Delta },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
