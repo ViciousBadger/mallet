@@ -12,7 +12,7 @@ use crate::{
     experimental::map::{
         db::{Db, Meta, META_TABLE},
         elements::{Element, ElementId, ElementRole, ErasedContent},
-        history::{Change, Delta, HistNode},
+        history::{Change, Delta, HistNode, Snapshot},
     },
     id::{Id, IdGen},
 };
@@ -22,15 +22,22 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
     let tx = map.begin_write()?;
 
     {
+        // Initial empty snapshot
+
+        let mut tbl_snap = tx.open_table(history::SNAPSHOT_TABLE)?;
+        let initial_snap_id = id_gen.generate();
+        tbl_snap.insert(initial_snap_id, Snapshot::empty())?;
+
+        // Initial history node
         let mut tbl_hist = tx.open_table(history::HIST_TABLE)?;
         let initial_hist_id = id_gen.generate();
         tbl_hist.insert(
             initial_hist_id,
             HistNode {
                 timestamp: history::new_timestamp(),
-                parent_key: None,
-                child_keys: Vec::default(),
-                change: Change::InitMap,
+                parent_id: None,
+                child_ids: Vec::default(),
+                snapshot_id: initial_snap_id,
             },
         )?;
 
@@ -39,7 +46,7 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
             (),
             Meta {
                 name: "a map".to_string(),
-                hist_key: initial_hist_id,
+                hist_node_id: initial_hist_id,
             },
         )?;
     }
@@ -71,7 +78,7 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
         let new_elem = Element {
             name: "a brush".to_string(),
             role: ElementRole::Brush,
-            content_key: new_elem_content_id,
+            content_id: new_elem_content_id,
         };
 
         // Get meta to get id of current hist entry
@@ -83,8 +90,8 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
 
         let new_node = HistNode {
             timestamp: history::new_timestamp(),
-            parent_key: Some(meta.hist_key),
-            child_keys: Vec::default(),
+            parent_id: Some(meta.hist_node_id),
+            child_ids: Vec::default(),
             change: Change::Element {
                 key: new_elem_id,
                 delta: Delta::Create {
@@ -98,7 +105,13 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
         hist.insert(&hist_key, &new_node)?;
 
         // Set meta to point to newest history entry
-        tbl_meta.insert((), Meta { hist_key, ..meta })?;
+        tbl_meta.insert(
+            (),
+            Meta {
+                hist_node_id: hist_key,
+                ..meta
+            },
+        )?;
 
         info!("yey done!");
     }
@@ -110,7 +123,19 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
 
 // Committing things to the map...
 #[derive(Event)]
-pub enum Commit {
+pub struct Commit{changes: Vec<Change>};
+
+impl Commit {
+    pub fn single(change: Change) -> Self {
+        Self{changes: vec![change]}
+    }
+
+    pub fn many(changes: Vec<Change>) -> Self {
+        Self{changes}
+    }
+}
+
+pub enum Change {
     Create {
         name: String,
         content: ErasedContent,
@@ -119,141 +144,42 @@ pub enum Commit {
         element_key: Id,
         new_name: String,
     },
-    Modify {
+    ModifyContent {
         element_key: Id,
         new_content: ErasedContent,
     },
     Remove {
         element_key: Id,
     },
-    // - Paste.. for copy-pasting
-    // - Multi edit?
-    //  - would be nice to move multiple elements same distance.
-    //      - either specify each element with before-after or a relative distance for all elements to move..
-    //  - would also be nice to multi apply surfaces (materials).
-    //
-    //  How to structure all this..
-    //  - Commit(Vec<Change>)?
-    //      - git-inspired
 }
 
 fn commit_to_map(
     map_db: Res<Db>,
     elem_lookup: Res<ElementLookup>,
-    q_elements: Query<&Element>,
+    q_elements: Query<&mut Element>,
     mut id_gen: ResMut<IdGen>,
     mut commits: EventReader<Commit>,
 ) -> Result {
+    // Commit to map should do changes in the game world, then capture snapshot into history... i guess..
+    // right now, changes go to map, then map is diff'd with the world.. instead just push changes to world, let world be, then snap..
+    // idk man. what to do with element content? save to db here in commit? save to db in snapshot process?? here its easy because event contains type erased content. not so ez in a snapshot system.
+    // so if the content is inserted in db when committing, how will it be handled when snapshotting? maybe just don't care? it is there already, why bother, let it be..
+    //
     for commit in commits.read() {
-        match commit {
-            Commit::Create { name, content } => {
-                let tx = map_db.begin_write()?;
-                {
-                    // Insert the content
-                    let new_content_key = id_gen.generate();
-                    match content.role() {
-                        ElementRole::Brush => {
-                            let brush: &Brush = content.downcast_ref()?;
-                            let mut tbl_brushes = tx.open_table(elements::CONTENT_TABLE_BRUSH)?;
-                            tbl_brushes.insert(new_content_key, brush)?;
-                        }
-                        ElementRole::Light => todo!(),
-                    }
+        // 1: reflect in world
 
-                    // Construct the element using content key
-                    let new_elem_key = id_gen.generate();
-                    let new_elem = Element {
-                        name: name.clone(),
-                        role: content.role(),
-                        content_key: new_content_key,
-                    };
-
-                    // Insert the history entry
-                    let mut tbl_hist = tx.open_table(history::HIST_TABLE)?;
-                    let mut tbl_meta = tx.open_table(META_TABLE)?;
-                    let meta = tbl_meta.get(())?.unwrap().value();
-                    let prev_hist_key = meta.hist_key;
-
-                    let new_hist_key = id_gen.generate();
-                    tbl_hist.insert(
-                        new_hist_key,
-                        HistNode {
-                            timestamp: history::new_timestamp(),
-                            parent_key: Some(prev_hist_key),
-                            child_keys: Vec::new(),
-                            change: Change::Element {
-                                key: new_elem_key,
-                                delta: Delta::Create {
-                                    element: new_elem,
-                                    content_key: new_content_key,
-                                },
-                            },
-                        },
-                    )?;
-
-                    tbl_meta.insert(
-                        (),
-                        Meta {
-                            hist_key: new_hist_key,
-                            ..meta
-                        },
-                    )?;
-                }
-                tx.commit()?;
+        for change in commit.changes {
+            match change {
+                Change::Create { name, content } => todo!(),
+                Change::Rename { element_key, new_name } => todo!(),
+                Change::ModifyContent { element_key, new_content } => todo!(),
+                Change::Remove { element_key } => todo!(),
             }
-            Commit::Rename {
-                element_key,
-                new_name,
-            } => {
-                let tx = map_db.begin_write()?;
-                {
-                    let element = q_elements.get(elem_lookup.find(element_key)?)?;
-
-                    // Insert the history entry
-                    let mut tbl_hist = tx.open_table(history::HIST_TABLE)?;
-                    let mut tbl_meta = tx.open_table(META_TABLE)?;
-                    let meta = tbl_meta.get(())?.unwrap().value();
-                    let prev_hist_key = meta.hist_key;
-
-                    let new_hist_key = id_gen.generate();
-                    tbl_hist.insert(
-                        new_hist_key,
-                        HistNode {
-                            timestamp: history::new_timestamp(),
-                            parent_key: Some(prev_hist_key),
-                            child_keys: Vec::new(),
-                            change: Change::Element {
-                                key: *element_key,
-                                delta: Delta::Modify {
-                                    then: element.clone(),
-                                    now: Element {
-                                        name: new_name.clone(),
-                                        role: element.role,
-                                        content_key: element.content_key,
-                                    },
-                                },
-                            },
-                        },
-                    )?;
-
-                    tbl_meta.insert(
-                        (),
-                        Meta {
-                            hist_key: new_hist_key,
-                            ..meta
-                        },
-                    )?;
-                }
-                tx.commit()?;
-            }
-            Commit::Modify {
-                element_key,
-                new_content,
-            } => todo!(),
-            Commit::Remove { element_key } => todo!(),
         }
+
+        // 2: capture a snapshot into history - this should happen for each commit, so its difficult to split into another system, because at that point the world will be a reflection of ALL commits this frame.
+        // on the other hand, world changes such as spawning will not be queryable until AFTER system has run.. yet another dilemma..
     }
-    // TODO: Collect result for each commit, so that further commits can still be run in case of failure.
     Ok(())
 }
 

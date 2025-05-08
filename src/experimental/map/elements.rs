@@ -22,7 +22,7 @@ pub const MAIN_STATE_TABLE: TableDefinition<Id, Postcard<Element>> =
 pub struct Element {
     pub name: String,
     pub role: ElementRole,
-    pub content_key: Id,
+    pub content_id: Id,
 }
 
 #[derive(Component, Deref, Clone, Copy, Debug, PartialEq, Eq, Hash)]

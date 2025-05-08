@@ -25,7 +25,7 @@ pub const META_TABLE: TableDefinition<(), Postcard<Meta>> = TableDefinition::new
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Meta {
     pub name: String,
-    pub hist_key: Id,
+    pub hist_node_id: Id,
 }
 
 impl redb::Value for Id {
