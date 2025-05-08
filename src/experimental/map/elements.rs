@@ -1,6 +1,9 @@
+use std::any::Any;
+
 use bevy::prelude::*;
 use redb::TableDefinition;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::{
     core::map::{brush::Brush, light::Light},
@@ -27,4 +30,38 @@ pub struct Element {
 pub enum ElementRole {
     Brush = 0,
     Light = 1,
+}
+
+// Playground below
+// Dyn is weird.
+
+pub trait ElementContent: Send + Sync {
+    fn role(&self) -> ElementRole;
+}
+
+impl ElementContent for Brush {
+    fn role(&self) -> ElementRole {
+        ElementRole::Brush
+    }
+}
+
+impl ElementContent for Light {
+    fn role(&self) -> ElementRole {
+        ElementRole::Light
+    }
+}
+
+#[derive(Error, Debug)]
+#[error("asdf")]
+pub struct ContentDowncastFail;
+
+pub struct ErasedContent {
+    inner: Box<dyn ElementContent>,
+}
+impl ErasedContent {
+    pub fn downcast_ref<T: 'static>(&self) -> Result<&T, ContentDowncastFail> {
+        (&self.inner as &dyn Any)
+            .downcast_ref()
+            .ok_or(ContentDowncastFail)
+    }
 }

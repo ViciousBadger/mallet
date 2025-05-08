@@ -10,10 +10,10 @@ use crate::{
     core::map::brush::{Brush, BrushBounds},
     experimental::map::{
         db::{Db, Meta, META_TABLE},
-        elements::{Element, ElementRole},
+        elements::{Element, ElementRole, ErasedContent},
         history::{Change, Delta, HistNode},
     },
-    id::IdGen,
+    id::{Id, IdGen},
 };
 
 fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
@@ -104,6 +104,64 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
 
     txn.commit()?;
 
+    Ok(())
+}
+
+// Committing things to the map...
+#[derive(Event)]
+pub enum Commit {
+    Create {
+        element: Element,
+        content: ErasedContent,
+    },
+    Rename {
+        element_key: Id,
+        new_name: String,
+    },
+    Modify {
+        element: Element,
+        content: ErasedContent,
+    },
+    Remove {
+        element_key: Id,
+    },
+}
+
+fn commit_to_map(
+    map_db: Res<Db>,
+    mut id_gen: ResMut<IdGen>,
+    mut commits: EventReader<Commit>,
+) -> Result {
+    for commit in commits.read() {
+        match commit {
+            Commit::Create { element, content } => {
+                let tx = map_db.begin_write()?;
+                {
+                    // Insert the content
+                    let new_content_id = id_gen.generate();
+                    match content.role() {
+                        ElementRole::Brush => {
+                            let brush: &Brush = content.downcast_ref()?;
+                            let mut tbl_brushes = tx.open_table(elements::CONTENT_TABLE_BRUSH)?;
+                            tbl_brushes.insert(new_content_id, brush)?;
+                        }
+                        ElementRole::Light => todo!(),
+                    }
+
+                    // Insert the history entry
+                    let new_elem_id = id_gen.generate();
+                }
+                tx.commit()?;
+            }
+            Commit::Rename {
+                element_key,
+                new_name,
+            } => todo!(),
+            Commit::Modify { element, content } => todo!(),
+            Commit::Remove { element_key } => todo!(),
+        }
+    }
+    // TODO: Collect result for each commit, so that further commits can still be run in case of failure.
     Ok(())
 }
 
