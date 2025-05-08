@@ -1,17 +1,17 @@
 pub mod db;
+pub mod elements;
+pub mod history;
 
 use bevy::{input::common_conditions::input_pressed, prelude::*};
 use color_eyre::eyre::eyre;
 use redb::ReadableTable;
 
 use crate::{
-    core::map::{
-        brush::{Brush, BrushBounds},
-        light::{Light, LightType},
-    },
-    experimental::map::db::{
-        new_timestamp, Action, Db, Delta, Element, ElementRole, HistNode, Meta, HIST_TABLE,
-        META_TABLE,
+    core::map::brush::{Brush, BrushBounds},
+    experimental::map::{
+        db::{Db, Meta, META_TABLE},
+        elements::{Element, ElementRole},
+        history::{Change, Delta, HistNode},
     },
     id::IdGen,
 };
@@ -21,12 +21,15 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
     let tx = map.begin_write()?;
 
     {
-        let mut tbl_hist = tx.open_table(HIST_TABLE)?;
+        let mut tbl_hist = tx.open_table(history::HIST_TABLE)?;
         let initial_hist_id = id_gen.generate();
         tbl_hist.insert(
             initial_hist_id,
-            HistNode::MapInit {
-                timestamp: new_timestamp(),
+            HistNode {
+                timestamp: history::new_timestamp(),
+                parent_key: None,
+                child_keys: Vec::default(),
+                change: Change::InitMap,
             },
         )?;
 
@@ -49,7 +52,7 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
     let txn = map_db.begin_write()?;
     {
         // Insert the content
-        let mut tbl_brush = txn.open_table(db::CONTENT_TABLE_BRUSH)?;
+        let mut tbl_brush = txn.open_table(elements::CONTENT_TABLE_BRUSH)?;
 
         let new_elem_content_id = id_gen.generate();
 
@@ -77,10 +80,11 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
         // Create history entry
         let hist_key = id_gen.generate();
 
-        let new_node = HistNode::Node {
-            parent_key: meta.hist_key,
-            timestamp: new_timestamp(),
-            action: Action::Delta {
+        let new_node = HistNode {
+            timestamp: history::new_timestamp(),
+            parent_key: Some(meta.hist_key),
+            child_keys: Vec::default(),
+            change: Change::Delta {
                 element_id: new_elem_id,
                 delta: Delta::Create {
                     content_key: new_elem_content_id,
@@ -89,7 +93,7 @@ fn push_test(map_db: Res<Db>, mut id_gen: ResMut<IdGen>) -> Result {
             },
         };
 
-        let mut hist = txn.open_table(db::HIST_TABLE)?;
+        let mut hist = txn.open_table(history::HIST_TABLE)?;
         hist.insert(&hist_key, &new_node)?;
 
         // Set meta to point to newest history entry
