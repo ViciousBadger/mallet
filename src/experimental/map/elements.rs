@@ -18,12 +18,15 @@ pub const CONTENT_TABLE_LIGHT: TableDefinition<Id, Postcard<Light>> =
 pub const MAIN_STATE_TABLE: TableDefinition<Id, Postcard<Element>> =
     TableDefinition::new("main_state");
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Component, Serialize, Deserialize, Debug, Clone)]
 pub struct Element {
     pub name: String,
     pub role: ElementRole,
     pub content_key: Id,
 }
+
+#[derive(Component, Deref, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ElementId(Id);
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 #[repr(u8)]

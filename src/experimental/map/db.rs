@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
-use redb::{Database, TableDefinition, TypeName};
+use redb::{Database, TableDefinition, TransactionError, TypeName};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use ulid::Ulid;
 
