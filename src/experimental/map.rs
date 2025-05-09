@@ -10,14 +10,11 @@ use bevy::{
 use thiserror::Error;
 
 use crate::{
-    core::map::{
-        brush::{Brush, BrushBounds},
-        light::Light,
-    },
+    core::map::brush::{Brush, BrushBounds},
     experimental::map::{
-        changes::{apply_pending_changes, Change, ChangeSet, PendingChanges},
+        changes::{apply_pending_changes, Create, PendingChanges},
         db::{Db, Meta, TBL_META},
-        elements::{ElemId, ElemMeta, ElemRole},
+        elements::ElemId,
         history::HistNode,
     },
     id::{Id, IdGen},
@@ -64,36 +61,33 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
 
 fn new_thing(mut changes: ResMut<PendingChanges>) {
     changes.push_many(vec![
-        Change::Create {
+        Create {
             name: "first brush".to_string(),
             params: Brush {
                 bounds: BrushBounds {
                     start: Vec3::ZERO,
                     end: Vec3::ONE,
                 },
-            }
-            .into(),
+            },
         },
-        Change::Create {
+        Create {
             name: "second brush".to_string(),
             params: Brush {
                 bounds: BrushBounds {
                     start: Vec3::ZERO,
                     end: Vec3::ONE,
                 },
-            }
-            .into(),
+            },
         },
     ]);
-    changes.push_single(Change::Create {
+    changes.push_single(Create {
         name: "third brush (in its own change set)".to_string(),
         params: Brush {
             bounds: BrushBounds {
                 start: Vec3::ZERO,
                 end: Vec3::ONE,
             },
-        }
-        .into(),
+        },
     });
 
     info!("ok, pushed some changes.");

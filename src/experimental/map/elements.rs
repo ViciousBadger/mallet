@@ -1,6 +1,5 @@
-use bevy::{asset::io::ErasedAssetReader, prelude::*};
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::{
     core::map::{brush::Brush, light::Light},
@@ -27,4 +26,20 @@ pub struct ElemMeta {
 pub enum ElemRole {
     Brush = 0,
     Light = 1,
+}
+
+pub trait ElemParams: Send + Sync {
+    fn role(&self) -> ElemRole;
+}
+
+impl ElemParams for Brush {
+    fn role(&self) -> ElemRole {
+        ElemRole::Brush
+    }
+}
+
+impl ElemParams for Light {
+    fn role(&self) -> ElemRole {
+        ElemRole::Light
+    }
 }
