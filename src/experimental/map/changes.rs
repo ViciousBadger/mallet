@@ -80,6 +80,8 @@ impl Change for CreateElem<Brush> {
     fn apply_to_world(&self, world: &mut World) {
         // NOTE: hey, maybe this code should be where the whole "deploy" thing happens. since we
         // already have the concrete type of element..
+        // CAVEAT: restoring state does not invoke a CreateElem!
+        // when restoring a state the entire ElemMeta is spawned, not just .name ..
         let mut entity = self.spawn(world);
         entity.insert(self.params.clone());
         info!("applied create for Brush");

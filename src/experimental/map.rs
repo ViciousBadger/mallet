@@ -13,11 +13,14 @@ use bevy::{
 use thiserror::Error;
 
 use crate::{
-    core::map::brush::{Brush, BrushBounds},
+    core::map::{
+        brush::{Brush, BrushBounds},
+        light::Light,
+    },
     experimental::map::{
         changes::{Change, ChangeSet, CreateElem, PendingChanges},
-        db::{Db, Meta, TBL_META},
-        elements::ElemId,
+        db::{Db, Meta, TBL_META, TBL_OBJECTS},
+        elements::{ElemId, ElemMeta},
         history::{HistNode, TBL_HIST_NODES},
         states::{State, TBL_STATES},
     },
@@ -52,14 +55,14 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
         restore = Some(hist_node.state_id);
     } else {
         // Write initial stuff
-        let tx = db.begin_write()?;
+        let writer = db.begin_write()?;
         {
-            let mut tbl_states = tx.open_table(states::TBL_STATES)?;
+            let mut tbl_states = writer.open_table(states::TBL_STATES)?;
             let initial_state_id = id_gen.generate();
             tbl_states.insert(initial_state_id, states::State::empty())?;
 
             // Initial history node
-            let mut tbl_hist = tx.open_table(history::TBL_HIST_NODES)?;
+            let mut tbl_hist = writer.open_table(history::TBL_HIST_NODES)?;
             let initial_hist_id = id_gen.generate();
             tbl_hist.insert(
                 initial_hist_id,
@@ -71,7 +74,7 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
                 },
             )?;
 
-            let mut tbl_meta = tx.open_table(TBL_META)?;
+            let mut tbl_meta = writer.open_table(TBL_META)?;
             tbl_meta.insert(
                 (),
                 Meta {
@@ -80,7 +83,7 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
                 },
             )?;
         }
-        tx.commit()?;
+        writer.commit()?;
     }
 
     commands.insert_resource(db);
@@ -187,26 +190,26 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
     }
 
     // Step 2: create a state resource and run the snapshot schedule. other systems will fill out state.
-    let read_tx = world.resource::<Db>().begin_read()?;
-    let meta = read_tx.open_table(TBL_META)?.get(())?.unwrap().value();
-    let mut cur_hist = read_tx
+    let reader = world.resource::<Db>().begin_read()?;
+    let meta = reader.open_table(TBL_META)?.get(())?.unwrap().value();
+    let mut cur_hist = reader
         .open_table(TBL_HIST_NODES)?
         .get(meta.hist_node_id)?
         .unwrap()
         .value();
-    let cur_state = read_tx
+    let cur_state = reader
         .open_table(TBL_STATES)?
         .get(cur_hist.state_id)?
         .unwrap()
         .value();
-    drop(read_tx);
+    drop(reader);
 
     world.insert_resource(cur_state);
     world.run_schedule(StateSnapshot);
     world.flush();
 
     // Step 3: insert new state into db and create a history node.
-    let write_tx = world.resource::<Db>().begin_write()?;
+    let writer = world.resource::<Db>().begin_write()?;
     let new_state_id = world.resource_mut::<IdGen>().generate();
     let new_state = world.remove_resource::<states::State>().unwrap();
 
@@ -217,13 +220,13 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
         in_scene
     );
 
-    write_tx
+    writer
         .open_table(TBL_STATES)?
         .insert(new_state_id, new_state)?;
     let new_hist_id = world.resource_mut::<IdGen>().generate();
     {
         // Update children on the current history node first
-        let mut tbl_hist = write_tx.open_table(TBL_HIST_NODES)?;
+        let mut tbl_hist = writer.open_table(TBL_HIST_NODES)?;
         cur_hist.child_ids.push(new_hist_id);
         tbl_hist.insert(meta.hist_node_id, cur_hist)?;
         tbl_hist.insert(
@@ -236,14 +239,14 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
             },
         )?;
     }
-    write_tx.open_table(TBL_META)?.insert(
+    writer.open_table(TBL_META)?.insert(
         (),
         Meta {
             hist_node_id: new_hist_id,
             ..meta
         },
     )?;
-    write_tx.commit()?;
+    writer.commit()?;
     info!(
         "created a new hist node {} for new state {}",
         new_hist_id, new_state_id
@@ -263,16 +266,25 @@ fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
         .get(trigger.id)?
         .unwrap()
         .value();
-    drop(reader);
 
-    // let changes: Vec<Box<dyn Change>> = Vec::new();
-    // for (elem_id, elem) in state.elements {
-    //     changes.push(CreateElem {
-    //         id: Some(elem_id),
-    //         name: elem.meta.name, // ???
-    //         params: todo!(), //oops how doi do dis
-    //     }
-    // }
+    let objs = reader.open_table(TBL_OBJECTS)?;
+    for (elem_id, elem) in state.elements {
+        let meta = objs.get(elem.meta)?.unwrap().value().cast::<ElemMeta>();
+        let mut entity = world.spawn((ElemId::new(elem_id), meta.clone()));
+
+        match meta.role {
+            elements::ElemRole::Brush => {
+                let brush = objs.get(elem.params)?.unwrap().value().cast::<Brush>();
+                entity.insert(brush);
+                info!("brush from state!");
+            }
+            elements::ElemRole::Light => {
+                let light = objs.get(elem.params)?.unwrap().value().cast::<Light>();
+                entity.insert(light);
+                info!("light from state!");
+            }
+        }
+    }
 
     Ok(())
 }

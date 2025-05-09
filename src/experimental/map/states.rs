@@ -66,9 +66,11 @@ fn sync_elems(
             .get(id.id_ref())
             .is_none_or(|existing| new_checksum != existing.meta)
         {
-            db.begin_write()?
+            let writer = db.begin_write()?;
+            writer
                 .open_table(TBL_OBJECTS)?
                 .insert(&new_checksum, &new_meta)?;
+            writer.commit()?;
             changes.write(StateChange::SetMeta {
                 id: **id,
                 meta: new_checksum,
@@ -94,9 +96,11 @@ fn sync_brush(
             .get(id.id_ref())
             .is_none_or(|existing| new_checksum != existing.params)
         {
-            db.begin_write()?
+            let writer = db.begin_write()?;
+            writer
                 .open_table(TBL_OBJECTS)?
                 .insert(&new_checksum, &new_brush)?;
+            writer.commit()?;
             changes.write(StateChange::SetParams {
                 id: **id,
                 params: new_checksum,
