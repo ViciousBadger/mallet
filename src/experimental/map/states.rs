@@ -42,6 +42,8 @@ impl State {
     }
 }
 
+// Multiple typed statechange variants to allow parallel insertion
+// (Generalize by element role i guess)
 #[derive(Event, Debug)]
 enum StateChange {
     SetMeta { id: Id, meta: Checksum },

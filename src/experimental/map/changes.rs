@@ -55,12 +55,12 @@ pub fn get_elem_entity<'a>(world: &'a mut World, elem_id: &Id) -> EntityWorldMut
 }
 
 #[derive(Debug)]
-pub struct Create<T> {
+pub struct CreateElem<T> {
     pub name: String,
     pub params: T,
 }
 
-impl<T> Create<T>
+impl<T> CreateElem<T>
 where
     T: ElemParams,
 {
@@ -76,7 +76,7 @@ where
     }
 }
 
-impl Change for Create<Brush> {
+impl Change for CreateElem<Brush> {
     fn apply_to_world(&self, world: &mut World) {
         // NOTE: hey, maybe this code should be where the whole "deploy" thing happens. since we
         // already have the concrete type of element..
@@ -86,7 +86,7 @@ impl Change for Create<Brush> {
     }
 }
 
-impl Change for Create<Light> {
+impl Change for CreateElem<Light> {
     fn apply_to_world(&self, world: &mut World) {
         let mut entity = self.spawn(world);
         entity.insert(self.params.clone());
@@ -95,12 +95,12 @@ impl Change for Create<Light> {
 }
 
 #[derive(Debug)]
-pub struct ModMeta {
+pub struct UpdateElemMeta {
     pub elem_id: Id,
     pub new_meta: ElemMeta,
 }
 
-impl Change for ModMeta {
+impl Change for UpdateElemMeta {
     fn apply_to_world(&self, world: &mut World) {
         let mut entity = get_elem_entity(world, &self.elem_id);
         entity.insert(self.new_meta.clone());
@@ -109,12 +109,12 @@ impl Change for ModMeta {
 }
 
 #[derive(Debug)]
-pub struct ModParams<T> {
+pub struct UpdateElemParams<T> {
     pub elem_id: Id,
     pub new_params: T,
 }
 
-impl Change for ModParams<Brush> {
+impl Change for UpdateElemParams<Brush> {
     fn apply_to_world(&self, world: &mut World) {
         let mut entity = get_elem_entity(world, &self.elem_id);
         entity.insert(self.new_params.clone());
@@ -122,7 +122,7 @@ impl Change for ModParams<Brush> {
     }
 }
 
-impl Change for ModParams<Light> {
+impl Change for UpdateElemParams<Light> {
     fn apply_to_world(&self, world: &mut World) {
         let mut entity = get_elem_entity(world, &self.elem_id);
         entity.insert(self.new_params.clone());
@@ -130,11 +130,11 @@ impl Change for ModParams<Light> {
 }
 
 #[derive(Debug)]
-pub struct Remove {
+pub struct RemoveElem {
     pub elem_id: Id,
 }
 
-impl Change for Remove {
+impl Change for RemoveElem {
     fn apply_to_world(&self, world: &mut World) {
         get_elem_entity(world, &self.elem_id).despawn();
     }

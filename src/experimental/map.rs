@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::{
     core::map::brush::{Brush, BrushBounds},
     experimental::map::{
-        changes::{ChangeSet, Create, PendingChanges},
+        changes::{Change, ChangeSet, CreateElem, PendingChanges},
         db::{Db, Meta, TBL_META},
         elements::ElemId,
         history::{HistNode, TBL_HIST_NODES},
@@ -24,48 +24,76 @@ use crate::{
     id::{Id, IdGen},
 };
 
+#[derive(Event)]
+struct RestoreState {
+    pub id: Id,
+}
+
 fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
-    let map = Db::new_temp();
-    let tx = map.begin_write()?;
+    let db = Db::new();
 
+    let mut restore: Option<Id> = None;
+
+    if let Some(meta) = db
+        .begin_read()?
+        .open_table(TBL_META)
+        .map(|table| table.get(()).unwrap_or(None).map(|guard| guard.value()))
+        .unwrap_or(None)
     {
-        // Initial empty state
+        info!("load map !!!");
+        // Load the map
+        let reader = db.begin_read()?;
 
-        let mut tbl_states = tx.open_table(states::TBL_STATES)?;
-        let initial_state_id = id_gen.generate();
-        tbl_states.insert(initial_state_id, states::State::empty())?;
+        let hist_node = reader
+            .open_table(TBL_HIST_NODES)?
+            .get(meta.hist_node_id)?
+            .unwrap()
+            .value();
+        restore = Some(hist_node.state_id);
+    } else {
+        // Write initial stuff
+        let tx = db.begin_write()?;
+        {
+            let mut tbl_states = tx.open_table(states::TBL_STATES)?;
+            let initial_state_id = id_gen.generate();
+            tbl_states.insert(initial_state_id, states::State::empty())?;
 
-        // Initial history node
-        let mut tbl_hist = tx.open_table(history::TBL_HIST_NODES)?;
-        let initial_hist_id = id_gen.generate();
-        tbl_hist.insert(
-            initial_hist_id,
-            HistNode {
-                timestamp: history::new_timestamp(),
-                parent_id: None,
-                child_ids: Vec::default(),
-                state_id: initial_state_id,
-            },
-        )?;
+            // Initial history node
+            let mut tbl_hist = tx.open_table(history::TBL_HIST_NODES)?;
+            let initial_hist_id = id_gen.generate();
+            tbl_hist.insert(
+                initial_hist_id,
+                HistNode {
+                    timestamp: history::new_timestamp(),
+                    parent_id: None,
+                    child_ids: Vec::default(),
+                    state_id: initial_state_id,
+                },
+            )?;
 
-        let mut tbl_meta = tx.open_table(TBL_META)?;
-        tbl_meta.insert(
-            (),
-            Meta {
-                name: "a map".to_string(),
-                hist_node_id: initial_hist_id,
-            },
-        )?;
+            let mut tbl_meta = tx.open_table(TBL_META)?;
+            tbl_meta.insert(
+                (),
+                Meta {
+                    name: "test map".to_string(),
+                    hist_node_id: initial_hist_id,
+                },
+            )?;
+        }
+        tx.commit()?;
     }
-    tx.commit()?;
 
-    commands.insert_resource(map);
+    commands.insert_resource(db);
+
+    if let Some(id) = restore {
+        commands.trigger(RestoreState { id });
+    }
     Ok(())
 }
 
 fn new_thing(mut changes: ResMut<PendingChanges>) {
     changes.push_many(vec![
-        Create {
+        CreateElem {
             name: "first brush".to_string(),
             params: Brush {
                 bounds: BrushBounds {
@@ -74,7 +102,7 @@ fn new_thing(mut changes: ResMut<PendingChanges>) {
                 },
             },
         },
-        Create {
+        CreateElem {
             name: "second brush".to_string(),
             params: Brush {
                 bounds: BrushBounds {
@@ -84,7 +112,7 @@ fn new_thing(mut changes: ResMut<PendingChanges>) {
             },
         },
     ]);
-    changes.push_single(Create {
+    changes.push_single(CreateElem {
         name: "third brush (in its own change set)".to_string(),
         params: Brush {
             bounds: BrushBounds {
@@ -181,7 +209,14 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
     let write_tx = world.resource::<Db>().begin_write()?;
     let new_state_id = world.resource_mut::<IdGen>().generate();
     let new_state = world.remove_resource::<states::State>().unwrap();
-    info!("total elements in state: {}", new_state.elements.len());
+
+    let in_scene = world.query::<&ElemId>().iter(world).len();
+    info!(
+        "total elements in state: {}, in scene: {}",
+        new_state.elements.len(),
+        in_scene
+    );
+
     write_tx
         .open_table(TBL_STATES)?
         .insert(new_state_id, new_state)?;
@@ -219,6 +254,29 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
     Ok(())
 }
 
+fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
+    info!("restoring state {}", trigger.id);
+
+    let reader = world.resource::<Db>().begin_read()?;
+    let state = reader
+        .open_table(TBL_STATES)?
+        .get(trigger.id)?
+        .unwrap()
+        .value();
+    drop(reader);
+
+    // let changes: Vec<Box<dyn Change>> = Vec::new();
+    // for (elem_id, elem) in state.elements {
+    //     changes.push(CreateElem {
+    //         id: Some(elem_id),
+    //         name: elem.meta.name, // ???
+    //         params: todo!(), //oops how doi do dis
+    //     }
+    // }
+
+    Ok(())
+}
+
 #[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StateSnapshot;
 
@@ -237,4 +295,5 @@ pub fn plugin(app: &mut App) {
         ),
     );
     app.add_systems(Last, apply_pending_changes);
+    app.add_observer(restore_state);
 }

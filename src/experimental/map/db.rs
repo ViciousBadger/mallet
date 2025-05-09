@@ -13,7 +13,7 @@ pub struct Db {
 }
 
 impl Db {
-    pub fn new_temp() -> Db {
+    pub fn new() -> Db {
         Db {
             backing: Database::builder().create("test.db").unwrap(),
         }
