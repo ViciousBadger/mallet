@@ -15,10 +15,10 @@ pub trait Change: std::fmt::Debug + Send + Sync {
 
 #[derive(Debug)]
 pub struct ChangeSet {
-    changes: Vec<Box<dyn Change>>,
+    pub changes: Vec<Box<dyn Change>>,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Deref, DerefMut)]
 pub struct PendingChanges(Vec<ChangeSet>);
 
 impl PendingChanges {
@@ -47,35 +47,6 @@ impl PendingChanges {
             changes: boxed_changes,
         });
     }
-}
-
-pub fn apply_pending_changes(mut pending_changes: ResMut<PendingChanges>, mut commands: Commands) {
-    let change_sets: Vec<ChangeSet> = pending_changes.0.drain(..).collect();
-
-    if !change_sets.is_empty() {
-        info!("collected {} change sets", change_sets.len());
-    }
-
-    for change_set in change_sets {
-        commands.run_system_cached_with(apply_change_set_and_snapshot, change_set);
-    }
-}
-
-fn apply_change_set_and_snapshot(change_set: In<ChangeSet>, world: &mut World) {
-    info!("apply change set: {:?}", change_set);
-    let change_set = change_set.0;
-    // Step 1: apply to world.
-    for change in change_set.changes {
-        // Quirk: apply_to_world really could as well take ownership over the "change",
-        // but it's impossible when change is a Box<dyn Change>
-        change.apply_to_world(world);
-    }
-
-    // Step 2: create a state resource and run the snapshot schedule. other systems will fill out state.
-    todo!();
-
-    // Step 3: insert new state into db and create a history node.
-    todo!();
 }
 
 pub fn get_elem_entity<'a>(world: &'a mut World, elem_id: &Id) -> EntityWorldMut<'a> {

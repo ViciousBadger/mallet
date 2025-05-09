@@ -13,15 +13,19 @@ impl ElemId {
     pub fn new(id: Id) -> Self {
         Self(id)
     }
+
+    pub fn id_ref(&self) -> &Id {
+        &self.0
+    }
 }
 
-#[derive(Component, Serialize, Deserialize, Debug, Clone)]
+#[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ElemMeta {
     pub name: String,
     pub role: ElemRole,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ElemRole {
     Brush = 0,

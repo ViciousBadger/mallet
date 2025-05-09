@@ -1,7 +1,7 @@
-use std::marker::PhantomData;
+use std::{borrow::Borrow, marker::PhantomData};
 
 use bevy::prelude::*;
-use redb::{Database, TableDefinition, TypeName};
+use redb::{Database, ReadOnlyTable, ReadTransaction, TableDefinition, TypeName};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -69,8 +69,14 @@ impl redb::Key for Id {
     }
 }
 
-#[derive(Debug, Deref, DerefMut, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Deref, DerefMut, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Checksum(blake3::Hash);
+
+impl Checksum {
+    pub fn nil() -> Self {
+        Self(blake3::Hash::from_bytes([0; 32]))
+    }
+}
 
 impl redb::Value for Checksum {
     type SelfType<'a>
@@ -84,7 +90,7 @@ impl redb::Value for Checksum {
         Self: 'a;
 
     fn fixed_width() -> Option<usize> {
-        todo!()
+        Some(blake3::OUT_LEN)
     }
 
     fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
@@ -222,3 +228,33 @@ where
         TypeName::new(&format!("Card<{}>", std::any::type_name::<T>()))
     }
 }
+
+// pub trait EzRead<K: 'static + redb::Key, V: 'static + redb::Value> {
+//     fn get_from<'a>(
+//         &self,
+//         table: TableDefinition<K, V>,
+//         key: impl Borrow<K::SelfType<'a>>,
+//     ) -> Result<Option<V>>;
+// }
+//
+// impl<'a, K, V> EzRead<K, V> for ReadTransaction
+// where
+//     K: 'static + redb::Key,
+//     V: 'static + redb::Value<SelfType<'a> = V>,
+// {
+//     fn get_from<'b>(
+//         &self,
+//         table: TableDefinition<K, V>,
+//         key: impl Borrow<K::SelfType<'b>>,
+//     ) -> Result<Option<V::SelfType<'a>>> {
+//         Ok(self.open_table(table)?.get(key)?.map(|guard| guard.value()))
+//     }
+// }
+//
+// pub trait EzWrite {
+//     fn insert_into<'a, K: redb::Key + 'static, V: redb::Value + 'static>(
+//         &self,
+//         table: TableDefinition<K, V>,
+//         key: impl Borrow<K::SelfType<'a>>,
+//     );
+// }
