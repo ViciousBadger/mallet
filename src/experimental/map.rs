@@ -187,6 +187,7 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
         .insert(new_state_id, new_state)?;
     let new_hist_id = world.resource_mut::<IdGen>().generate();
     {
+        // Update children on the current history node first
         let mut tbl_hist = write_tx.open_table(TBL_HIST_NODES)?;
         cur_hist.child_ids.push(new_hist_id);
         tbl_hist.insert(meta.hist_node_id, cur_hist)?;

@@ -42,44 +42,36 @@ impl State {
     }
 }
 
+#[derive(Event, Debug)]
+enum StateChange {
+    SetMeta { id: Id, meta: Checksum },
+    SetParams { id: Id, params: Checksum },
+    // Removed id
+}
+
 fn sync_elems(
     db: Res<Db>,
-    mut state: ResMut<State>,
+    state: Res<State>,
     q_elems: Query<(&ElemId, &ElemMeta)>,
+    mut changes: EventWriter<StateChange>,
 ) -> Result {
     info!("sync elems running");
     for (id, meta) in q_elems.iter() {
-        if let Some(existing) = state.elements.get_mut(id.id_ref()) {
-            // Compare and update
-            // Can potentially optimize by caching checksum for every new/changed meta.
-            let (new_checksum, new_meta) = Object::new_typed(meta);
-            if new_checksum != existing.meta {
-                let write_tx = db.begin_write()?;
-                write_tx
-                    .open_table(TBL_OBJECTS)?
-                    .insert(&new_checksum, new_meta)?;
-                // Point to new meta !
-                existing.meta = new_checksum;
-                info!("meta changed {:?}", id);
-            }
-        } else {
-            // Insert new
-            info!("insert {:?}", id);
-            let write_tx = db.begin_write()?;
+        let (new_checksum, new_meta) = Object::new_typed(meta);
 
-            let (meta_check, meta_obj) = Object::new_typed(meta);
-            write_tx
+        if state
+            .elements
+            .get(id.id_ref())
+            .is_none_or(|existing| new_checksum != existing.meta)
+        {
+            db.begin_write()?
                 .open_table(TBL_OBJECTS)?
-                .insert(&meta_check, meta_obj)?;
-            write_tx.commit()?;
-
-            state.elements.insert(
-                **id,
-                ElemState {
-                    meta: meta_check,
-                    params: Checksum::nil(),
-                },
-            );
+                .insert(&new_checksum, &new_meta)?;
+            changes.write(StateChange::SetMeta {
+                id: **id,
+                meta: new_checksum,
+            });
+            info!("element meta inserted {:?}", id);
         }
     }
     Ok(())
@@ -87,26 +79,64 @@ fn sync_elems(
 
 fn sync_brush(
     db: Res<Db>,
-    mut state: ResMut<State>,
+    state: Res<State>,
     q_brushes: Query<(&ElemId, &Brush)>,
+    mut changes: EventWriter<StateChange>,
 ) -> Result {
     info!("sync brush running");
     for (id, brush) in q_brushes.iter() {
-        if let Some(existing) = state.elements.get_mut(id.id_ref()) {
-            let (new_checksum, new_brush) = Object::new_typed(brush);
-            if new_checksum != existing.params {
-                let write_tx = db.begin_write()?;
-                write_tx
-                    .open_table(TBL_OBJECTS)?
-                    .insert(&new_checksum, new_brush)?;
-                existing.params = new_checksum;
-                info!("brush changed {:?}", id);
-            }
+        let (new_checksum, new_brush) = Object::new_typed(brush);
+
+        if state
+            .elements
+            .get(id.id_ref())
+            .is_none_or(|existing| new_checksum != existing.params)
+        {
+            db.begin_write()?
+                .open_table(TBL_OBJECTS)?
+                .insert(&new_checksum, &new_brush)?;
+            changes.write(StateChange::SetParams {
+                id: **id,
+                params: new_checksum,
+            });
+            info!("brush inserted {:?}", id);
         }
     }
     Ok(())
 }
 
+fn apply_state_changes(mut changes: EventReader<StateChange>, mut state: ResMut<State>) {
+    for change in changes.read() {
+        info!("apply state change: {:?}", change);
+        match change {
+            StateChange::SetMeta { id, meta } => {
+                state
+                    .elements
+                    .entry(*id)
+                    .and_modify(|elem| elem.meta = meta.clone())
+                    .or_insert(ElemState {
+                        meta: meta.clone(),
+                        params: Checksum::nil(),
+                    });
+            }
+            StateChange::SetParams { id, params } => {
+                state
+                    .elements
+                    .entry(*id)
+                    .and_modify(|elem| elem.params = params.clone())
+                    .or_insert(ElemState {
+                        meta: Checksum::nil(),
+                        params: params.clone(),
+                    });
+            }
+        }
+    }
+}
+
 pub fn plugin(app: &mut App) {
-    app.add_systems(StateSnapshot, (sync_elems, sync_brush).chain());
+    app.add_event::<StateChange>();
+    app.add_systems(
+        StateSnapshot,
+        ((sync_elems, sync_brush), apply_state_changes).chain(),
+    );
 }
