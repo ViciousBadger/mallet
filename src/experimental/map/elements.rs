@@ -1,79 +1,30 @@
-use std::any::Any;
-
-use bevy::prelude::*;
-use redb::TableDefinition;
+use bevy::{asset::io::ErasedAssetReader, prelude::*};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
     core::map::{brush::Brush, light::Light},
-    experimental::map::db::Postcard,
     id::Id,
 };
 
-pub const CONTENT_TABLE_BRUSH: TableDefinition<Id, Postcard<Brush>> =
-    TableDefinition::new("content_brush");
-pub const CONTENT_TABLE_LIGHT: TableDefinition<Id, Postcard<Light>> =
-    TableDefinition::new("content_light");
-pub const MAIN_STATE_TABLE: TableDefinition<Id, Postcard<Element>> =
-    TableDefinition::new("main_state");
+#[derive(Component, Deref, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ElemId(Id);
 
-#[derive(Component, Serialize, Deserialize, Debug, Clone)]
-pub struct Element {
-    pub name: String,
-    pub role: ElementRole,
-    pub content_id: Id,
+impl ElemId {
+    pub fn new(id: Id) -> Self {
+        Self(id)
+    }
 }
 
-#[derive(Component, Deref, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ElementId(Id);
+#[derive(Component, Serialize, Deserialize, Debug, Clone)]
+pub struct ElemMeta {
+    pub name: String,
+    pub role: ElemRole,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 #[repr(u8)]
-pub enum ElementRole {
+pub enum ElemRole {
     Brush = 0,
     Light = 1,
-}
-
-// Playground below
-// Dyn is weird.
-
-pub trait ElementContent: Send + Sync + Any {
-    fn role(&self) -> ElementRole;
-}
-
-impl ElementContent for Brush {
-    fn role(&self) -> ElementRole {
-        ElementRole::Brush
-    }
-}
-
-impl ElementContent for Light {
-    fn role(&self) -> ElementRole {
-        ElementRole::Light
-    }
-}
-
-#[derive(Error, Debug)]
-#[error("asdf")]
-pub struct ContentDowncastFail;
-
-#[derive(Deref)]
-pub struct ErasedContent {
-    inner: Box<dyn ElementContent>,
-}
-impl ErasedContent {
-    pub fn downcast_ref<T: 'static>(&self) -> Result<&T, ContentDowncastFail> {
-        (&self.inner as &dyn Any)
-            .downcast_ref()
-            .ok_or(ContentDowncastFail)
-    }
-
-    fn as_any(self) -> Box<dyn Any> {
-        self.inner
-    }
-
-    pub fn downcast_owned<T: 'static>(self) -> Result<T, ContentDowncastFail> {
-        *self.as_any().downcast().map_err(|_| ContentDowncastFail)?
-    }
 }

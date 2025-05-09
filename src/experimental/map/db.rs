@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
-use redb::{Database, TableDefinition, TransactionError, TypeName};
+use redb::{Database, TableDefinition, TypeName};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -20,7 +20,8 @@ impl Db {
     }
 }
 
-pub const META_TABLE: TableDefinition<(), Postcard<Meta>> = TableDefinition::new("meta");
+pub const TBL_META: TableDefinition<(), Typed<Meta>> = TableDefinition::new("meta");
+pub const TBL_OBJECTS: TableDefinition<Checksum, Object> = TableDefinition::new("objects");
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Meta {
@@ -68,11 +69,124 @@ impl redb::Key for Id {
     }
 }
 
+#[derive(Debug, Deref, DerefMut, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Checksum(blake3::Hash);
+
+impl redb::Value for Checksum {
+    type SelfType<'a>
+        = Checksum
+    where
+        Self: 'a;
+
+    type AsBytes<'a>
+        = [u8; blake3::OUT_LEN]
+    where
+        Self: 'a;
+
+    fn fixed_width() -> Option<usize> {
+        todo!()
+    }
+
+    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
+    where
+        Self: 'a,
+    {
+        Checksum(blake3::Hash::from_bytes(data.try_into().unwrap()))
+    }
+
+    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+    where
+        Self: 'b,
+    {
+        *value.as_bytes()
+    }
+
+    fn type_name() -> TypeName {
+        TypeName::new("Checksum")
+    }
+}
+
+impl redb::Key for Checksum {
+    fn compare(_: &[u8], _: &[u8]) -> std::cmp::Ordering {
+        // No reason to sort hash values.
+        std::cmp::Ordering::Equal
+    }
+}
+
+/// Redb storage value for "objects" of any type, identified by their checksum.
 #[derive(Debug)]
-pub struct Postcard<T> {
+pub struct Object {
+    pub data: Vec<u8>,
+}
+
+impl Object {
+    /// New object from a serializable type.
+    pub fn new_typed<T>(input: &T) -> (Checksum, Object)
+    where
+        T: Serialize,
+    {
+        let bytes = postcard::to_stdvec(input).unwrap();
+        let checksum = Checksum(blake3::hash(&bytes));
+        (checksum, Object { data: bytes })
+    }
+
+    /// New object from raw data, e.g. a file.
+    pub fn new_raw(bytes: Vec<u8>) -> (Checksum, Object) {
+        let checksum = Checksum(blake3::hash(&bytes));
+        (checksum, Object { data: bytes })
+    }
+
+    /// Deserialize an object created from a type.
+    pub fn cast<T>(&self) -> T
+    where
+        T: DeserializeOwned,
+    {
+        postcard::from_bytes(&self.data).unwrap()
+    }
+}
+
+impl redb::Value for Object {
+    type SelfType<'a>
+        = Object
+    where
+        Self: 'a;
+
+    type AsBytes<'a>
+        = Vec<u8>
+    where
+        Self: 'a;
+
+    fn fixed_width() -> Option<usize> {
+        None
+    }
+
+    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
+    where
+        Self: 'a,
+    {
+        Object {
+            data: data.to_vec(),
+        }
+    }
+
+    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+    where
+        Self: 'b,
+    {
+        value.data.clone()
+    }
+
+    fn type_name() -> TypeName {
+        TypeName::new("Object")
+    }
+}
+
+#[derive(Debug)]
+pub struct Typed<T> {
     marker: PhantomData<T>,
 }
-impl<T> redb::Value for Postcard<T>
+
+impl<T> redb::Value for Typed<T>
 where
     T: std::fmt::Debug + Serialize + DeserializeOwned,
 {
