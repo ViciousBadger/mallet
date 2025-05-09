@@ -161,7 +161,7 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
     // Step 2: create a state resource and run the snapshot schedule. other systems will fill out state.
     let read_tx = world.resource::<Db>().begin_read()?;
     let meta = read_tx.open_table(TBL_META)?.get(())?.unwrap().value();
-    let cur_hist = read_tx
+    let mut cur_hist = read_tx
         .open_table(TBL_HIST_NODES)?
         .get(meta.hist_node_id)?
         .unwrap()
@@ -186,15 +186,20 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
         .open_table(TBL_STATES)?
         .insert(new_state_id, new_state)?;
     let new_hist_id = world.resource_mut::<IdGen>().generate();
-    write_tx.open_table(TBL_HIST_NODES)?.insert(
-        new_hist_id,
-        HistNode {
-            timestamp: history::new_timestamp(),
-            parent_id: Some(meta.hist_node_id),
-            child_ids: Vec::new(),
-            state_id: new_state_id,
-        },
-    )?;
+    {
+        let mut tbl_hist = write_tx.open_table(TBL_HIST_NODES)?;
+        cur_hist.child_ids.push(new_hist_id);
+        tbl_hist.insert(meta.hist_node_id, cur_hist)?;
+        tbl_hist.insert(
+            new_hist_id,
+            HistNode {
+                timestamp: history::new_timestamp(),
+                parent_id: Some(meta.hist_node_id),
+                child_ids: Vec::new(),
+                state_id: new_state_id,
+            },
+        )?;
+    }
     write_tx.open_table(TBL_META)?.insert(
         (),
         Meta {
@@ -207,6 +212,9 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
         "created a new hist node {} for new state {}",
         new_hist_id, new_state_id
     );
+
+    // TODO: update children of the ole node
+
     Ok(())
 }
 
