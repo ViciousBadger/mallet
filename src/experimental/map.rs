@@ -179,6 +179,9 @@ fn commit_to_map(
 
         // 2: capture a snapshot into history - this should happen for each commit, so its difficult to split into another system, because at that point the world will be a reflection of ALL commits this frame.
         // on the other hand, world changes such as spawning will not be queryable until AFTER system has run.. yet another dilemma..
+        // idea: only process at most one commit per frame. issue: event queue is cleared after a few frames, so the commits would have to be stored elsewhere.
+        // ...
+        // perhaps the commit_to_map system should have full world access; it won't hurt performance and should probably lock all threads anyway. that way we could capture snapshots between each commit.
     }
     Ok(())
 }

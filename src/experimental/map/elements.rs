@@ -38,7 +38,7 @@ pub enum ElementRole {
 // Playground below
 // Dyn is weird.
 
-pub trait ElementContent: Send + Sync {
+pub trait ElementContent: Send + Sync + Any {
     fn role(&self) -> ElementRole;
 }
 
@@ -67,5 +67,13 @@ impl ErasedContent {
         (&self.inner as &dyn Any)
             .downcast_ref()
             .ok_or(ContentDowncastFail)
+    }
+
+    fn as_any(self) -> Box<dyn Any> {
+        self.inner
+    }
+
+    pub fn downcast_owned<T: 'static>(self) -> Result<T, ContentDowncastFail> {
+        *self.as_any().downcast().map_err(|_| ContentDowncastFail)?
     }
 }
