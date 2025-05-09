@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, marker::PhantomData};
+use std::{borrow::Borrow, marker::PhantomData, sync::Arc};
 
 use bevy::prelude::*;
 use redb::{Database, ReadOnlyTable, ReadTransaction, TableDefinition, TypeName};
@@ -9,13 +9,13 @@ use crate::id::Id;
 
 #[derive(Resource, Deref)]
 pub struct Db {
-    backing: redb::Database,
+    backing: Arc<redb::Database>,
 }
 
 impl Db {
     pub fn new() -> Db {
         Db {
-            backing: Database::builder().create("test.db").unwrap(),
+            backing: Arc::new(Database::builder().create("test.db").unwrap()),
         }
     }
 }
