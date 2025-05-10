@@ -18,9 +18,13 @@ use crate::{
         light::Light,
     },
     experimental::map::{
-        changes::{Change, ChangeSet, CreateElem, PendingChanges},
-        db::{Db, Meta, TBL_META, TBL_OBJECTS},
-        elements::{ElemId, ElemMeta},
+        changes::{
+            Change, ChangeSet, CreateElem,
+            NewElemId::{self, Generated, Loaded},
+            PendingChanges, RestoreElem,
+        },
+        db::{Checksum, Db, Meta, TBL_META, TBL_OBJECTS},
+        elements::{ElemId, ElemMeta, ElemParams, NewMeta},
         history::{HistNode, TBL_HIST_NODES},
         states::{State, TBL_STATES},
     },
@@ -97,7 +101,10 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
 fn new_thing(mut changes: ResMut<PendingChanges>) {
     changes.push_many(vec![
         CreateElem {
-            name: "first brush".to_string(),
+            id: Generated,
+            meta: NewMeta {
+                name: "first brush".to_string(),
+            },
             params: Brush {
                 bounds: BrushBounds {
                     start: Vec3::ZERO,
@@ -106,7 +113,10 @@ fn new_thing(mut changes: ResMut<PendingChanges>) {
             },
         },
         CreateElem {
-            name: "second brush".to_string(),
+            id: Generated,
+            meta: NewMeta {
+                name: "second brush".to_string(),
+            },
             params: Brush {
                 bounds: BrushBounds {
                     start: Vec3::ZERO,
@@ -116,7 +126,10 @@ fn new_thing(mut changes: ResMut<PendingChanges>) {
         },
     ]);
     changes.push_single(CreateElem {
-        name: "third brush (in its own change set)".to_string(),
+        id: Generated,
+        meta: NewMeta {
+            name: "third brush (in its own change set)".to_string(),
+        },
         params: Brush {
             bounds: BrushBounds {
                 start: Vec3::ZERO,
@@ -270,21 +283,15 @@ fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
     let objs = reader.open_table(TBL_OBJECTS)?;
     for (elem_id, elem) in state.elements {
         let meta = objs.get(elem.meta)?.unwrap().value().cast::<ElemMeta>();
-        let mut entity = world.spawn((ElemId::new(elem_id), meta.clone()));
-
-        match meta.role {
-            elements::ElemRole::Brush => {
-                let brush = objs.get(elem.params)?.unwrap().value().cast::<Brush>();
-                entity.insert(brush);
-                info!("brush from state!");
-            }
-            elements::ElemRole::Light => {
-                let light = objs.get(elem.params)?.unwrap().value().cast::<Light>();
-                entity.insert(light);
-                info!("light from state!");
-            }
+        RestoreElem {
+            id: elem_id,
+            meta,
+            params: elem.params,
         }
+        .apply_to_world(world);
     }
+
+    // TODO: Remove elems not in the state
 
     Ok(())
 }

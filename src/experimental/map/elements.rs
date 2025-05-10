@@ -25,6 +25,24 @@ pub struct ElemMeta {
     pub role: ElemRole,
 }
 
+#[derive(Debug, Clone)]
+pub struct NewMeta {
+    pub name: String,
+}
+
+impl From<ElemMeta> for NewMeta {
+    fn from(ElemMeta { name, .. }: ElemMeta) -> Self {
+        Self { name }
+    }
+}
+
+impl ElemMeta {
+    pub fn from_new(value: &NewMeta, role: ElemRole) -> Self {
+        let NewMeta { name } = value.clone();
+        Self { role, name }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ElemRole {
@@ -32,7 +50,7 @@ pub enum ElemRole {
     Light = 1,
 }
 
-pub trait ElemParams: Send + Sync {
+pub trait ElemParams: Send + Sync + std::fmt::Debug {
     fn role(&self) -> ElemRole;
 }
 

@@ -1,9 +1,11 @@
 use bevy::prelude::*;
+use serde::de::DeserializeOwned;
 
 use crate::{
     core::map::{brush::Brush, light::Light},
     experimental::map::{
-        elements::{ElemId, ElemMeta, ElemParams},
+        db::{Checksum, Db, TBL_OBJECTS},
+        elements::{ElemId, ElemMeta, ElemParams, ElemRole, NewMeta},
         ElementLookup,
     },
     id::{Id, IdGen},
@@ -49,15 +51,52 @@ impl PendingChanges {
     }
 }
 
-pub fn get_elem_entity<'a>(world: &'a mut World, elem_id: &Id) -> EntityWorldMut<'a> {
-    let entity_id = world.resource_mut::<ElementLookup>().find(elem_id).unwrap();
-    world.entity_mut(entity_id)
+pub fn get_elem_entity<'a>(world: &'a mut World, elem_id: &Id) -> Option<EntityWorldMut<'a>> {
+    let entity_id = world.resource_mut::<ElementLookup>().find(elem_id).ok()?;
+    Some(world.entity_mut(entity_id))
+}
+
+pub fn elem_has_entity(world: &mut World, elem_id: &Id) -> bool {
+    world.resource_mut::<ElementLookup>().find(elem_id).is_ok()
+}
+
+pub fn get_elem_params<T>(world: &mut World, checksum: &Checksum) -> T
+where
+    T: ElemParams + DeserializeOwned,
+{
+    world
+        .resource::<Db>()
+        .begin_read()
+        .unwrap()
+        .open_table(TBL_OBJECTS)
+        .unwrap()
+        .get(checksum)
+        .unwrap()
+        .unwrap()
+        .value()
+        .cast::<T>()
 }
 
 #[derive(Debug)]
 pub struct CreateElem<T> {
-    pub name: String,
+    pub id: NewElemId,
+    pub meta: NewMeta,
     pub params: T,
+}
+
+#[derive(Debug)]
+pub enum NewElemId {
+    Loaded(Id),
+    Generated,
+}
+
+impl NewElemId {
+    pub fn loaded_id_or_none(&self) -> Option<Id> {
+        match self {
+            NewElemId::Loaded(id) => Some(*id),
+            NewElemId::Generated => None,
+        }
+    }
 }
 
 impl<T> CreateElem<T>
@@ -65,13 +104,13 @@ where
     T: ElemParams,
 {
     pub fn spawn<'a>(&'a self, world: &'a mut World) -> EntityWorldMut<'a> {
-        let new_id = world.resource_mut::<IdGen>().generate();
+        let id = self
+            .id
+            .loaded_id_or_none()
+            .unwrap_or_else(|| world.resource_mut::<IdGen>().generate());
         world.spawn((
-            ElemId::new(new_id),
-            ElemMeta {
-                name: self.name.clone(),
-                role: self.params.role(),
-            },
+            ElemId::new(id),
+            ElemMeta::from_new(&self.meta, self.params.role()),
         ))
     }
 }
@@ -102,9 +141,10 @@ pub struct UpdateElemMeta {
     pub new_meta: ElemMeta,
 }
 
+// TODO: use CreateOrUpdate? create if nto exist, update if exist.
 impl Change for UpdateElemMeta {
     fn apply_to_world(&self, world: &mut World) {
-        let mut entity = get_elem_entity(world, &self.elem_id);
+        let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
         entity.insert(self.new_meta.clone());
         info!("applied modmeta");
     }
@@ -118,7 +158,7 @@ pub struct UpdateElemParams<T> {
 
 impl Change for UpdateElemParams<Brush> {
     fn apply_to_world(&self, world: &mut World) {
-        let mut entity = get_elem_entity(world, &self.elem_id);
+        let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
         entity.insert(self.new_params.clone());
         info!("applied modparams for Brush");
     }
@@ -126,7 +166,7 @@ impl Change for UpdateElemParams<Brush> {
 
 impl Change for UpdateElemParams<Light> {
     fn apply_to_world(&self, world: &mut World) {
-        let mut entity = get_elem_entity(world, &self.elem_id);
+        let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
         entity.insert(self.new_params.clone());
     }
 }
@@ -138,6 +178,60 @@ pub struct RemoveElem {
 
 impl Change for RemoveElem {
     fn apply_to_world(&self, world: &mut World) {
-        get_elem_entity(world, &self.elem_id).despawn();
+        get_elem_entity(world, &self.elem_id).unwrap().despawn();
+    }
+}
+
+#[derive(Debug)]
+pub struct RestoreElem {
+    pub id: Id,
+    pub meta: ElemMeta,
+    pub params: Checksum,
+}
+
+impl Change for RestoreElem {
+    fn apply_to_world(&self, world: &mut World) {
+        if elem_has_entity(world, &self.id) {
+            UpdateElemMeta {
+                elem_id: self.id,
+                new_meta: self.meta.clone(),
+            }
+            .apply_to_world(world);
+            match self.meta.role {
+                ElemRole::Brush => {
+                    UpdateElemParams {
+                        elem_id: self.id,
+                        new_params: get_elem_params::<Brush>(world, &self.params),
+                    }
+                    .apply_to_world(world);
+                }
+                ElemRole::Light => {
+                    UpdateElemParams {
+                        elem_id: self.id,
+                        new_params: get_elem_params::<Light>(world, &self.params),
+                    }
+                    .apply_to_world(world);
+                }
+            }
+        } else {
+            match self.meta.role {
+                ElemRole::Brush => {
+                    CreateElem {
+                        id: NewElemId::Loaded(self.id),
+                        meta: self.meta.clone().into(),
+                        params: get_elem_params::<Brush>(world, &self.params),
+                    }
+                    .apply_to_world(world);
+                }
+                ElemRole::Light => {
+                    CreateElem {
+                        id: NewElemId::Loaded(self.id),
+                        meta: self.meta.clone().into(),
+                        params: get_elem_params::<Light>(world, &self.params),
+                    }
+                    .apply_to_world(world);
+                }
+            }
+        }
     }
 }
