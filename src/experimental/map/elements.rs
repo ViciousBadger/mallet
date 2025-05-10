@@ -1,4 +1,7 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    marker::PhantomData,
+};
 
 use bevy::{asset::ErasedAssetLoader, platform::collections::HashMap, prelude::*};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -6,7 +9,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use crate::{
     core::map::{brush::Brush, light::Light},
     experimental::map::{
-        changes::{Change, CreateElem, NewElemId},
+        changes::{Change, CreateElem, NewElemId, UpdateElemParams},
         db::Object,
     },
     id::Id,
@@ -51,66 +54,67 @@ impl Role for Light {
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct ElementRoleRegistry {
-    pub roles: HashMap<u64, RoleImpls>,
+    pub roles: HashMap<u64, Box<dyn ChangeBuilder>>,
 }
 
-pub trait RoleCreateFn: Send + Sync {
-    fn build(&self, id: NewElemId, info: Info, params: Object) -> Box<dyn Change>;
+pub trait ChangeBuilder: Send + Sync + 'static {
+    fn build_create(&self, id: NewElemId, info: Info, raw_params: Object) -> Box<dyn Change>;
+    fn build_update(&self, id: Id, raw_params: Object) -> Box<dyn Change>;
 }
 
-impl<F> RoleCreateFn for F
+struct ChangeBuilderForRole<R>(PhantomData<R>);
+impl<R> ChangeBuilder for ChangeBuilderForRole<R>
 where
-    F: Fn(NewElemId, Info, Object) -> Box<dyn Change> + Send + Sync + 'static,
+    R: Role + 'static,
+    CreateElem<R>: Change,
+    UpdateElemParams<R>: Change,
 {
-    fn build(&self, id: NewElemId, info: Info, params: Object) -> Box<dyn Change> {
-        self(id, info, params)
+    fn build_create(&self, id: NewElemId, info: Info, raw_params: Object) -> Box<dyn Change> {
+        let params = raw_params.cast::<R>();
+        Box::new(CreateElem { id, info, params })
     }
-}
 
-pub trait RoleUpdateFn: Send + Sync {
-    fn build(&self, id: Id, new_params: Object) -> Box<dyn Change>;
-}
-
-impl<F> RoleUpdateFn for F
-where
-    F: Fn(Id, Object) -> Box<dyn Change> + Send + Sync + 'static,
-{
-    fn build(&self, id: Id, params: Object) -> Box<dyn Change> {
-        self(id, params)
+    fn build_update(&self, elem_id: Id, raw_params: Object) -> Box<dyn Change> {
+        let new_params = raw_params.cast::<R>();
+        Box::new(UpdateElemParams {
+            elem_id,
+            new_params,
+        })
     }
-}
-
-pub struct RoleImpls {
-    pub build_create: Box<dyn RoleCreateFn + Send + Sync>,
-    pub build_update: Box<dyn RoleUpdateFn + Send + Sync>,
 }
 
 impl ElementRoleRegistry {
-    pub fn register<R>(&mut self, impls: RoleImpls)
+    pub fn register<R>(&mut self)
     where
-        R: Role,
+        R: Role + 'static,
+        CreateElem<R>: Change,
+        UpdateElemParams<R>: Change,
     {
         let id_hash = R::id_hash();
-        // let create = |id, info, params: Object| {
-        //     let params = params.cast::<R>();
-        //     todo!();
-        //     Box::new(CreateElem { id, info, params })
-        // };
-
-        self.roles.insert(id_hash, impls);
+        let builder: ChangeBuilderForRole<R> = ChangeBuilderForRole(PhantomData);
+        self.roles.insert(id_hash, Box::new(builder));
     }
 }
 
 pub trait AppRoles {
-    fn register_map_element_role<R: Role>(&mut self, impls: RoleImpls);
+    fn register_map_element_role<R>(&mut self)
+    where
+        R: Role + 'static,
+        CreateElem<R>: Change,
+        UpdateElemParams<R>: Change;
 }
 
 impl AppRoles for App {
-    fn register_map_element_role<R: Role>(&mut self, impls: RoleImpls) {
+    fn register_map_element_role<R>(&mut self)
+    where
+        R: Role + 'static,
+        CreateElem<R>: Change,
+        UpdateElemParams<R>: Change,
+    {
         self.world_mut()
             .resource_mut::<ElementRoleRegistry>()
-            .register::<R>(impls);
+            .register::<R>();
     }
 }

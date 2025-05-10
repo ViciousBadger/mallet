@@ -16,10 +16,10 @@ use crate::{
         changes::{
             Change, ChangeSet, CreateElem,
             NewElemId::{self, Generated},
-            PendingChanges, UpdateElemParams,
+            PendingChanges, UpdateElemInfo, UpdateElemParams,
         },
         db::{Db, Meta, Object, TBL_META, TBL_OBJECTS},
-        elements::{AppRoles, ElementId, Info, RoleImpls},
+        elements::{AppRoles, ChangeBuilder, ElementId, ElementRoleRegistry, Info},
         history::{HistNode, TBL_HIST_NODES},
         states::TBL_STATES,
     },
@@ -277,8 +277,27 @@ fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
 
     let objs = reader.open_table(TBL_OBJECTS)?;
     for (elem_id, elem) in state.elements {
-        let meta = objs.get(elem.info)?.unwrap().value().cast::<Info>();
+        let info = objs.get(elem.info)?.unwrap().value().cast::<Info>();
         let params = objs.get(elem.params)?.unwrap().value();
+
+        world.resource_scope(|world: &mut World, registry: Mut<ElementRoleRegistry>| {
+            let builder = registry.roles.get(&elem.role.unwrap()).unwrap();
+
+            if world.resource::<ElementLookup>().find(&elem_id).is_ok() {
+                // Exists, update
+                UpdateElemInfo {
+                    elem_id,
+                    new_info: info,
+                }
+                .apply_to_world(world);
+                builder.build_update(elem_id, params).apply_to_world(world);
+            } else {
+                // Create
+                builder
+                    .build_create(NewElemId::Loaded(elem_id), info, params)
+                    .apply_to_world(world);
+            }
+        });
     }
     //     RestoreElem {
     //         id: elem_id,
@@ -311,26 +330,23 @@ pub fn plugin(app: &mut App) {
     );
     app.add_systems(Last, apply_pending_changes);
     app.add_observer(restore_state);
-    app.register_map_element_role::<Brush>(RoleImpls {
-        build_create: Box::new(|id, info, params: Object| {
-            let typed_params = params.cast::<Brush>();
-            Box::new(CreateElem::<Brush> {
-                id,
-                info,
-                params: typed_params,
-            })
-        }),
-        build_update: Box::new(|elem_id, new_params| {
-            new_params = new_params.cast::<Brush>();
-
-            Box::new(UpdateElemParams::<Brush> {
-                elem_id,
-                new_params,
-            })
-        }),
-    });
+    // app.register_map_element_role::<Brush>(BrushBuilder);
+    app.init_resource::<ElementRoleRegistry>();
+    app.register_map_element_role::<Brush>();
 }
 
-pub fn build_create_brush(id: NewElemId, info: Info, params: Brush) -> Box<dyn Change> {
-    Box::new(CreateElem { id, info, params })
-}
+// pub struct BrushBuilder;
+// impl RoleChangeBuilder for BrushBuilder {
+//     fn build_create(&self, id: NewElemId, info: Info, raw_params: Object) -> Box<dyn Change> {
+//         let params = raw_params.cast::<Brush>();
+//         Box::new(CreateElem { id, info, params })
+//     }
+//
+//     fn build_update(&self, elem_id: Id, raw_params: Object) -> Box<dyn Change> {
+//         let new_params = raw_params.cast::<Brush>();
+//         Box::new(UpdateElemParams {
+//             elem_id,
+//             new_params,
+//         })
+//     }
+// }
