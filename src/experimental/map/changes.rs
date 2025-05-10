@@ -1,10 +1,8 @@
 use bevy::prelude::*;
-use serde::de::DeserializeOwned;
 
 use crate::{
     core::map::{brush::Brush, light::Light},
     experimental::map::{
-        db::{Checksum, Db, TBL_OBJECTS},
         elements::{ElementId, Info, Role},
         ElementLookup,
     },
@@ -56,10 +54,6 @@ pub fn get_elem_entity<'a>(world: &'a mut World, elem_id: &Id) -> Option<EntityW
     Some(world.entity_mut(entity_id))
 }
 
-pub fn elem_has_entity(world: &mut World, elem_id: &Id) -> bool {
-    world.resource_mut::<ElementLookup>().find(elem_id).is_ok()
-}
-
 #[derive(Debug)]
 pub struct CreateElem<R> {
     pub id: NewElemId,
@@ -82,32 +76,31 @@ impl NewElemId {
     }
 }
 
-impl<R> CreateElem<R>
+impl<R> Change for CreateElem<R>
 where
     R: Role,
+    UpdateElemParams<R>: Change,
 {
-    pub fn spawn<'a>(&'a self, world: &'a mut World) -> EntityWorldMut<'a> {
+    fn apply_to_world(&self, world: &mut World) {
         let id = self
             .id
             .loaded_id_or_none()
             .unwrap_or_else(|| world.resource_mut::<IdGen>().generate());
-        world.spawn((ElementId::new(id), self.info.clone()))
-    }
-}
+        let entity_id = world.spawn((ElementId::new(id), self.info.clone())).id();
+        world.resource_mut::<ElementLookup>().insert(id, entity_id);
 
-impl Change for CreateElem<Brush> {
-    fn apply_to_world(&self, world: &mut World) {
-        let mut entity = self.spawn(world);
-        entity.insert(self.params.clone());
-        info!("applied create for Brush");
-    }
-}
-
-impl Change for CreateElem<Light> {
-    fn apply_to_world(&self, world: &mut World) {
-        let mut entity = self.spawn(world);
-        entity.insert(self.params.clone());
-        info!("applied create for Light");
+        // Ok, now update info and params, to re-use the code.
+        UpdateElemInfo {
+            elem_id: id,
+            new_info: self.info.clone(),
+        }
+        .apply_to_world(world);
+        UpdateElemParams::<R> {
+            elem_id: id,
+            new_params: self.params.clone(),
+        }
+        .apply_to_world(world);
+        info!("applied create for a generic elem role :)");
     }
 }
 

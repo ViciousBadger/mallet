@@ -152,6 +152,10 @@ impl ElementLookup {
             .copied()
             .ok_or(ElementLookupError(*element_id))
     }
+
+    pub fn insert(&mut self, element_id: Id, entity: Entity) {
+        self.0.insert(element_id, entity);
+    }
 }
 
 fn track_element_ids(
@@ -330,23 +334,6 @@ pub fn plugin(app: &mut App) {
     );
     app.add_systems(Last, apply_pending_changes);
     app.add_observer(restore_state);
-    // app.register_map_element_role::<Brush>(BrushBuilder);
     app.init_resource::<ElementRoleRegistry>();
     app.register_map_element_role::<Brush>();
 }
-
-// pub struct BrushBuilder;
-// impl RoleChangeBuilder for BrushBuilder {
-//     fn build_create(&self, id: NewElemId, info: Info, raw_params: Object) -> Box<dyn Change> {
-//         let params = raw_params.cast::<Brush>();
-//         Box::new(CreateElem { id, info, params })
-//     }
-//
-//     fn build_update(&self, elem_id: Id, raw_params: Object) -> Box<dyn Change> {
-//         let new_params = raw_params.cast::<Brush>();
-//         Box::new(UpdateElemParams {
-//             elem_id,
-//             new_params,
-//         })
-//     }
-// }

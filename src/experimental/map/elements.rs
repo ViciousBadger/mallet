@@ -33,7 +33,7 @@ pub struct Info {
     pub name: String,
 }
 
-pub trait Role: Send + Sync + DeserializeOwned {
+pub trait Role: Send + Sync + DeserializeOwned + std::fmt::Debug + Clone {
     fn id() -> &'static str;
     fn id_hash() -> u64 {
         let mut s = DefaultHasher::new();
