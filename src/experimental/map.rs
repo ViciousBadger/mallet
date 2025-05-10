@@ -5,28 +5,21 @@ pub mod history;
 pub mod states;
 
 use bevy::{
-    ecs::schedule::ScheduleLabel,
-    input::common_conditions::{input_just_pressed, input_pressed},
-    platform::collections::HashMap,
+    ecs::schedule::ScheduleLabel, input::common_conditions::*, platform::collections::HashMap,
     prelude::*,
 };
 use thiserror::Error;
 
 use crate::{
-    core::map::{
-        brush::{Brush, BrushBounds},
-        light::Light,
-    },
+    core::map::brush::{Brush, BrushBounds},
     experimental::map::{
         changes::{
-            Change, ChangeSet, CreateElem,
-            NewElemId::{self, Generated, Loaded},
-            PendingChanges, RestoreElem,
+            Change, ChangeSet, CreateElem, NewElemId::Generated, PendingChanges, RestoreElem,
         },
-        db::{Checksum, Db, Meta, TBL_META, TBL_OBJECTS},
-        elements::{ElemId, ElemMeta, ElemParams, NewMeta},
+        db::{Db, Meta, TBL_META, TBL_OBJECTS},
+        elements::{ElemId, ElemMeta, NewMeta},
         history::{HistNode, TBL_HIST_NODES},
-        states::{State, TBL_STATES},
+        states::TBL_STATES,
     },
     id::{Id, IdGen},
 };
@@ -63,7 +56,7 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
         {
             let mut tbl_states = writer.open_table(states::TBL_STATES)?;
             let initial_state_id = id_gen.generate();
-            tbl_states.insert(initial_state_id, states::State::empty())?;
+            tbl_states.insert(initial_state_id, states::State::default())?;
 
             // Initial history node
             let mut tbl_hist = writer.open_table(history::TBL_HIST_NODES)?;

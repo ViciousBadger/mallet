@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     core::map::brush::Brush,
     experimental::map::{
-        db::{Checksum, Db, Object, Typed, TBL_META, TBL_OBJECTS},
+        db::{Checksum, Db, Object, Typed, TBL_OBJECTS},
         elements::{ElemId, ElemMeta},
         StateSnapshot,
     },
@@ -14,7 +14,7 @@ use crate::{
 
 pub const TBL_STATES: TableDefinition<Id, Typed<State>> = TableDefinition::new("states");
 
-#[derive(Serialize, Deserialize, Debug, Resource)]
+#[derive(Serialize, Deserialize, Debug, Resource, Default)]
 pub struct State {
     pub elements: HashMap<Id, ElemState>,
     // snapshot should also store all Media used in the map, to be able to undo/redo media
@@ -26,20 +26,6 @@ pub struct State {
 pub struct ElemState {
     pub meta: Checksum,
     pub params: Checksum,
-}
-
-impl ElemState {
-    pub fn params(&self) -> &Checksum {
-        &self.params
-    }
-}
-
-impl State {
-    pub fn empty() -> Self {
-        Self {
-            elements: HashMap::new(),
-        }
-    }
 }
 
 // Multiple typed statechange variants to allow parallel insertion

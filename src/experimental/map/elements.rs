@@ -1,8 +1,14 @@
-use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
+use std::{
+    any::{Any, TypeId},
+    hash::{DefaultHasher, Hash, Hasher},
+};
+
+use bevy::{platform::collections::HashMap, prelude::*};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
     core::map::{brush::Brush, light::Light},
+    experimental::map::db::Object,
     id::Id,
 };
 
@@ -52,16 +58,29 @@ pub enum ElemRole {
 
 pub trait ElemParams: Send + Sync + std::fmt::Debug {
     fn role(&self) -> ElemRole;
+
+    fn identifier() -> &'static str;
+    fn id_hash() -> u64 {
+        let mut s = DefaultHasher::new();
+        Self::identifier().hash(&mut s);
+        s.finish()
+    }
 }
 
 impl ElemParams for Brush {
     fn role(&self) -> ElemRole {
         ElemRole::Brush
     }
+    fn identifier() -> &'static str {
+        "brush"
+    }
 }
 
 impl ElemParams for Light {
     fn role(&self) -> ElemRole {
         ElemRole::Light
+    }
+    fn identifier() -> &'static str {
+        "light"
     }
 }

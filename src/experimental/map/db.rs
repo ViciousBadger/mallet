@@ -1,7 +1,7 @@
-use std::{borrow::Borrow, marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 
 use bevy::prelude::*;
-use redb::{Database, ReadOnlyTable, ReadTransaction, TableDefinition, TypeName};
+use redb::{Database, TableDefinition, TypeName};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use ulid::Ulid;
 
