@@ -1,10 +1,10 @@
 use std::{
-    any::{Any, TypeId},
     hash::{DefaultHasher, Hash, Hasher},
+    marker::PhantomData,
 };
 
-use bevy::{platform::collections::HashMap, prelude::*};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use bevy::{ecs::system::SystemId, prelude::*};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     core::map::{brush::Brush, light::Light},
@@ -82,5 +82,47 @@ impl ElemParams for Light {
     }
     fn identifier() -> &'static str {
         "light"
+    }
+}
+
+#[derive(Event)]
+pub struct Deploy<T> {
+    input: T,
+    entity: Entity,
+}
+
+pub fn deploy_meta(trigger: Trigger<Deploy<ElemMeta>>, mut commands: Commands) {
+    let meta = trigger.input.clone();
+    info!("deploy meta!! {:?}", meta);
+    commands.entity(trigger.entity).insert(meta);
+}
+
+pub fn deploy_brush(trigger: Trigger<Deploy<Brush>>, mut commands: Commands) {
+    // let brush = trigger.input.cast::<Brush>();
+    let brush = trigger.input.clone();
+    info!("deploy brush!! {:?}", brush);
+    commands.entity(trigger.entity).insert(brush);
+}
+
+trait DeployRegistry {
+    fn register_deployable<T: Send + Sync + 'static>(&mut self);
+}
+
+impl DeployRegistry for App {
+    fn register_deployable<T>(&mut self)
+    where
+        T: Sync + Send + 'static,
+    {
+        let world = self.world();
+        // this is where we would grab the "deploy registry"
+        // and insert a thingy that can somehow determine which concrete Deploy<T> to call
+        // .. based on whataver actually needs to be deployed..
+        let sys = |input: In<(Object, Entity)>, mut commands: Commands| {
+            let (obj, ent) = input.0;
+            commands.trigger(Deploy {
+                input: obj,
+                entity: ent,
+            });
+        };
     }
 }
