@@ -3,8 +3,8 @@ use std::{
     marker::PhantomData,
 };
 
-use bevy::{ecs::system::SystemId, prelude::*};
-use serde::{Deserialize, Serialize};
+use bevy::{ecs::system::SystemId, platform::collections::HashMap, prelude::*};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
     core::map::{brush::Brush, light::Light},
@@ -58,7 +58,21 @@ pub enum ElemRole {
 
 pub trait ElemParams: Send + Sync + std::fmt::Debug {
     fn role(&self) -> ElemRole;
+}
 
+impl ElemParams for Brush {
+    fn role(&self) -> ElemRole {
+        ElemRole::Brush
+    }
+}
+
+impl ElemParams for Light {
+    fn role(&self) -> ElemRole {
+        ElemRole::Light
+    }
+}
+
+pub trait Deployable: Send + Sync + DeserializeOwned + 'static {
     fn identifier() -> &'static str;
     fn id_hash() -> u64 {
         let mut s = DefaultHasher::new();
@@ -67,62 +81,100 @@ pub trait ElemParams: Send + Sync + std::fmt::Debug {
     }
 }
 
-impl ElemParams for Brush {
-    fn role(&self) -> ElemRole {
-        ElemRole::Brush
+impl Deployable for ElemMeta {
+    fn identifier() -> &'static str {
+        "meta"
     }
+}
+
+impl Deployable for Brush {
     fn identifier() -> &'static str {
         "brush"
     }
 }
 
-impl ElemParams for Light {
-    fn role(&self) -> ElemRole {
-        ElemRole::Light
-    }
+impl Deployable for Light {
     fn identifier() -> &'static str {
         "light"
     }
 }
 
 #[derive(Event)]
-pub struct Deploy<T> {
+pub struct Deploy<T: Deployable> {
     input: T,
-    entity: Entity,
+    target: Entity,
 }
 
 pub fn deploy_meta(trigger: Trigger<Deploy<ElemMeta>>, mut commands: Commands) {
     let meta = trigger.input.clone();
     info!("deploy meta!! {:?}", meta);
-    commands.entity(trigger.entity).insert(meta);
+    commands.entity(trigger.target).insert(meta);
 }
 
 pub fn deploy_brush(trigger: Trigger<Deploy<Brush>>, mut commands: Commands) {
     // let brush = trigger.input.cast::<Brush>();
     let brush = trigger.input.clone();
     info!("deploy brush!! {:?}", brush);
-    commands.entity(trigger.entity).insert(brush);
+    commands.entity(trigger.target).insert(brush);
 }
 
-trait DeployRegistry {
-    fn register_deployable<T: Send + Sync + 'static>(&mut self);
+trait AppRegisterDeployable {
+    fn register_deployable<T: Deployable>(&mut self);
 }
 
-impl DeployRegistry for App {
+impl AppRegisterDeployable for App {
     fn register_deployable<T>(&mut self)
     where
-        T: Sync + Send + 'static,
+        T: Deployable,
     {
-        let world = self.world();
+        let deployer_fn = |input: Object, target: Entity, mut commands: Commands| {
+            let typed_input = input.cast::<T>();
+            commands.trigger(Deploy {
+                input: typed_input,
+                target,
+            });
+        };
+        self.world_mut()
+            .resource_mut::<DeployerRegistry>()
+            .register::<T>(deployer_fn);
+
         // this is where we would grab the "deploy registry"
         // and insert a thingy that can somehow determine which concrete Deploy<T> to call
         // .. based on whataver actually needs to be deployed..
-        let sys = |input: In<(Object, Entity)>, mut commands: Commands| {
-            let (obj, ent) = input.0;
-            commands.trigger(Deploy {
-                input: obj,
-                entity: ent,
-            });
-        };
+
+        // let sys = |input: In<(Object, Entity)>, mut commands: Commands| {
+        //     let (obj, ent) = input.0;
+        //     commands.trigger(Deploy {
+        //         input: obj,
+        //         entity: ent,
+        //     });
+        // };
+    }
+}
+
+pub trait Deployer: Send + Sync + 'static {
+    fn deploy(&self, input: Object, target: Entity, commands: Commands);
+}
+
+impl<F> Deployer for F
+where
+    F: Fn(Object, Entity, Commands) + Send + Sync + 'static,
+{
+    fn deploy(&self, input: Object, target: Entity, commands: Commands) {
+        self(input, target, commands);
+    }
+}
+
+#[derive(Resource)]
+struct DeployerRegistry {
+    pub deployers: HashMap<u64, Box<dyn Deployer>>,
+}
+impl DeployerRegistry {
+    pub fn register<T>(&mut self, deployer: impl Deployer)
+    where
+        T: Deployable,
+    {
+        let id_hash = T::id_hash();
+        self.deployers.insert(id_hash, Box::new(deployer));
     }
 }
