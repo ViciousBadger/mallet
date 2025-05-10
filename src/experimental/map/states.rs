@@ -6,7 +6,7 @@ use crate::{
     core::map::brush::Brush,
     experimental::map::{
         db::{Checksum, Db, Object, Typed, TBL_OBJECTS},
-        elements::{ElemId, ElemMeta},
+        elements::{ElementId, Info, Role},
         StateSnapshot,
     },
     id::Id,
@@ -16,15 +16,17 @@ pub const TBL_STATES: TableDefinition<Id, Typed<State>> = TableDefinition::new("
 
 #[derive(Serialize, Deserialize, Debug, Resource, Default)]
 pub struct State {
-    pub elements: HashMap<Id, ElemState>,
+    pub elements: HashMap<Id, ElementState>,
     // snapshot should also store all Media used in the map, to be able to undo/redo media
     // add/delete/rename.. BUT not the media contents nor the element contents. those should be
     // stored separately and only deleted when all referring history snapshots are gone.. i guess..
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ElemState {
-    pub meta: Checksum,
+pub struct ElementState {
+    /// used to insert/update the correct kind of element when restoring a state
+    pub role: Option<u64>,
+    pub info: Checksum,
     pub params: Checksum,
 }
 
@@ -32,36 +34,36 @@ pub struct ElemState {
 // (Generalize by element role i guess)
 #[derive(Event, Debug)]
 enum StateChange {
-    SetMeta { id: Id, meta: Checksum },
-    SetParams { id: Id, params: Checksum },
+    SetInfo { id: Id, info: Checksum },
+    SetParams { id: Id, role: u64, params: Checksum },
     // Removed id
 }
 
 fn sync_elems(
     db: Res<Db>,
     state: Res<State>,
-    q_elems: Query<(&ElemId, &ElemMeta)>,
+    q_elems: Query<(&ElementId, &Info)>,
     mut changes: EventWriter<StateChange>,
 ) -> Result {
     info!("sync elems running");
-    for (id, meta) in q_elems.iter() {
-        let (new_checksum, new_meta) = Object::new_typed(meta);
+    for (id, info) in q_elems.iter() {
+        let (new_checksum, new_info) = Object::new_typed(info);
 
         if state
             .elements
             .get(id.id_ref())
-            .is_none_or(|existing| new_checksum != existing.meta)
+            .is_none_or(|existing| new_checksum != existing.info)
         {
             let writer = db.begin_write()?;
             writer
                 .open_table(TBL_OBJECTS)?
-                .insert(&new_checksum, &new_meta)?;
+                .insert(&new_checksum, &new_info)?;
             writer.commit()?;
-            changes.write(StateChange::SetMeta {
+            changes.write(StateChange::SetInfo {
                 id: **id,
-                meta: new_checksum,
+                info: new_checksum,
             });
-            info!("element meta inserted {:?}", id);
+            info!("element info inserted {:?}", id);
         }
     }
     Ok(())
@@ -70,7 +72,7 @@ fn sync_elems(
 fn sync_brush(
     db: Res<Db>,
     state: Res<State>,
-    q_brushes: Query<(&ElemId, &Brush)>,
+    q_brushes: Query<(&ElementId, &Brush)>,
     mut changes: EventWriter<StateChange>,
 ) -> Result {
     info!("sync brush running");
@@ -89,6 +91,7 @@ fn sync_brush(
             writer.commit()?;
             changes.write(StateChange::SetParams {
                 id: **id,
+                role: Brush::id_hash(),
                 params: new_checksum,
             });
             info!("brush inserted {:?}", id);
@@ -101,23 +104,28 @@ fn apply_state_changes(mut changes: EventReader<StateChange>, mut state: ResMut<
     for change in changes.read() {
         info!("apply state change: {:?}", change);
         match change {
-            StateChange::SetMeta { id, meta } => {
+            StateChange::SetInfo { id, info: meta } => {
                 state
                     .elements
                     .entry(*id)
-                    .and_modify(|elem| elem.meta = meta.clone())
-                    .or_insert(ElemState {
-                        meta: meta.clone(),
+                    .and_modify(|elem| elem.info = meta.clone())
+                    .or_insert(ElementState {
+                        role: None,
+                        info: meta.clone(),
                         params: Checksum::nil(),
                     });
             }
-            StateChange::SetParams { id, params } => {
+            StateChange::SetParams { id, role, params } => {
                 state
                     .elements
                     .entry(*id)
-                    .and_modify(|elem| elem.params = params.clone())
-                    .or_insert(ElemState {
-                        meta: Checksum::nil(),
+                    .and_modify(|elem| {
+                        elem.role = Some(*role);
+                        elem.params = params.clone();
+                    })
+                    .or_insert(ElementState {
+                        role: Some(*role),
+                        info: Checksum::nil(),
                         params: params.clone(),
                     });
             }

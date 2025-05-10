@@ -14,10 +14,12 @@ use crate::{
     core::map::brush::{Brush, BrushBounds},
     experimental::map::{
         changes::{
-            Change, ChangeSet, CreateElem, NewElemId::Generated, PendingChanges, RestoreElem,
+            Change, ChangeSet, CreateElem,
+            NewElemId::{self, Generated},
+            PendingChanges, UpdateElemParams,
         },
-        db::{Db, Meta, TBL_META, TBL_OBJECTS},
-        elements::{ElemId, ElemMeta, NewMeta},
+        db::{Db, Meta, Object, TBL_META, TBL_OBJECTS},
+        elements::{AppRoles, ElementId, Info, RoleImpls},
         history::{HistNode, TBL_HIST_NODES},
         states::TBL_STATES,
     },
@@ -95,7 +97,7 @@ fn new_thing(mut changes: ResMut<PendingChanges>) {
     changes.push_many(vec![
         CreateElem {
             id: Generated,
-            meta: NewMeta {
+            info: Info {
                 name: "first brush".to_string(),
             },
             params: Brush {
@@ -107,7 +109,7 @@ fn new_thing(mut changes: ResMut<PendingChanges>) {
         },
         CreateElem {
             id: Generated,
-            meta: NewMeta {
+            info: Info {
                 name: "second brush".to_string(),
             },
             params: Brush {
@@ -120,7 +122,7 @@ fn new_thing(mut changes: ResMut<PendingChanges>) {
     ]);
     changes.push_single(CreateElem {
         id: Generated,
-        meta: NewMeta {
+        info: Info {
             name: "third brush (in its own change set)".to_string(),
         },
         params: Brush {
@@ -153,8 +155,8 @@ impl ElementLookup {
 }
 
 fn track_element_ids(
-    q_added_ids: Query<(&ElemId, Entity), Added<ElemId>>,
-    mut q_removed_ids: RemovedComponents<ElemId>,
+    q_added_ids: Query<(&ElementId, Entity), Added<ElementId>>,
+    mut q_removed_ids: RemovedComponents<ElementId>,
     mut lookup: ResMut<ElementLookup>,
 ) {
     for (id, entity) in q_added_ids.iter() {
@@ -219,7 +221,7 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
     let new_state_id = world.resource_mut::<IdGen>().generate();
     let new_state = world.remove_resource::<states::State>().unwrap();
 
-    let in_scene = world.query::<&ElemId>().iter(world).len();
+    let in_scene = world.query::<&ElementId>().iter(world).len();
     info!(
         "total elements in state: {}, in scene: {}",
         new_state.elements.len(),
@@ -275,14 +277,15 @@ fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
 
     let objs = reader.open_table(TBL_OBJECTS)?;
     for (elem_id, elem) in state.elements {
-        let meta = objs.get(elem.meta)?.unwrap().value().cast::<ElemMeta>();
-        RestoreElem {
-            id: elem_id,
-            meta,
-            params: elem.params,
-        }
-        .apply_to_world(world);
+        let meta = objs.get(elem.info)?.unwrap().value().cast::<Info>();
+        let params = objs.get(elem.params)?.unwrap().value();
     }
+    //     RestoreElem {
+    //         id: elem_id,
+    //         meta,
+    //         params: elem.params,
+    //     }
+    //     .apply_to_world(world);
 
     // TODO: Remove elems not in the state
 
@@ -308,4 +311,26 @@ pub fn plugin(app: &mut App) {
     );
     app.add_systems(Last, apply_pending_changes);
     app.add_observer(restore_state);
+    app.register_map_element_role::<Brush>(RoleImpls {
+        build_create: Box::new(|id, info, params: Object| {
+            let typed_params = params.cast::<Brush>();
+            Box::new(CreateElem::<Brush> {
+                id,
+                info,
+                params: typed_params,
+            })
+        }),
+        build_update: Box::new(|elem_id, new_params| {
+            new_params = new_params.cast::<Brush>();
+
+            Box::new(UpdateElemParams::<Brush> {
+                elem_id,
+                new_params,
+            })
+        }),
+    });
+}
+
+pub fn build_create_brush(id: NewElemId, info: Info, params: Brush) -> Box<dyn Change> {
+    Box::new(CreateElem { id, info, params })
 }
