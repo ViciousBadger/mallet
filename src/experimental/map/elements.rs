@@ -3,7 +3,7 @@ use std::{
     marker::PhantomData,
 };
 
-use bevy::{asset::ErasedAssetLoader, platform::collections::HashMap, prelude::*};
+use bevy::{platform::collections::HashMap, prelude::*};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
@@ -17,7 +17,6 @@ use crate::{
 
 #[derive(Component, Deref, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ElementId(Id);
-
 impl ElementId {
     pub fn new(id: Id) -> Self {
         Self(id)

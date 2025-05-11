@@ -95,7 +95,7 @@ where
             new_info: self.info.clone(),
         }
         .apply_to_world(world);
-        UpdateElemParams::<R> {
+        UpdateElemParams {
             elem_id: id,
             new_params: self.params.clone(),
         }

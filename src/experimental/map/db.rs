@@ -127,18 +127,27 @@ pub struct Object {
 
 impl Object {
     /// New object from a serializable type.
-    pub fn new_typed<T>(input: &T) -> (Checksum, Object)
-    where
-        T: Serialize,
-    {
-        let bytes = postcard::to_stdvec(input).unwrap();
-        let checksum = Checksum(blake3::hash(&bytes));
-        (checksum, Object { data: bytes })
+    pub fn new_typed<T: Serialize>(input: &T) -> (Checksum, Object) {
+        let bytes = Self::to_bytes(input);
+        (Self::checksum(&bytes), Object { data: bytes })
+    }
+
+    pub fn checksum_typed<T: Serialize>(input: &T) -> Checksum {
+        let bytes = Self::to_bytes(input);
+        Checksum(blake3::hash(&bytes))
+    }
+
+    fn to_bytes<T: Serialize>(input: &T) -> Vec<u8> {
+        postcard::to_stdvec(input).unwrap()
+    }
+
+    pub fn checksum(bytes: &[u8]) -> Checksum {
+        Checksum(blake3::hash(bytes))
     }
 
     /// New object from raw data, e.g. a file.
     pub fn new_raw(bytes: Vec<u8>) -> (Checksum, Object) {
-        let checksum = Checksum(blake3::hash(&bytes));
+        let checksum = Self::checksum(&bytes);
         (checksum, Object { data: bytes })
     }
 
