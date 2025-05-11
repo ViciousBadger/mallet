@@ -4,18 +4,7 @@ use ulid::{serde::ulid_as_u128, Ulid};
 
 /// Persistent identifier.
 #[derive(
-    Deref,
-    Debug,
-    PartialOrd,
-    Ord,
-    PartialEq,
-    Eq,
-    Hash,
-    Clone,
-    Copy,
-    Serialize,
-    Deserialize,
-    Component,
+    Deref, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, Clone, Copy, Serialize, Deserialize,
 )]
 pub struct Id(#[serde(with = "ulid_as_u128")] pub Ulid);
 

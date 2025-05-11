@@ -5,14 +5,13 @@ use itertools::Itertools;
 use crate::{
     core::{
         binds::{Binding, InputBindingSystem},
-        map::{brush::Brush, LiveMapNodeId},
+        map::elements::{brush::Brush, ElementEntity, ElementId},
     },
     editor::{
         cursor::{CursorMode, SpatialAxis, SpatialCursor},
         freelook::FreelookState,
         EditorSystems,
     },
-    id::Id,
     util::Facing3d,
 };
 
@@ -33,14 +32,14 @@ impl SelectedPosOrDefault for Option<Res<'_, SelectedPos>> {
 /// Exists when one or more map nodes are intersecting the selected position.
 #[derive(Resource)]
 pub struct SelectionTargets {
-    pub intersecting: Vec<LiveMapNodeId>,
-    pub focused: LiveMapNodeId,
+    pub intersecting: Vec<ElementEntity>,
+    pub focused: ElementEntity,
 }
 
 /// Exists when a map node has been explicitly selected.
 // TODO: Enum for multi-selection?
 #[derive(Resource, Deref)]
-pub struct SelectedNode(pub LiveMapNodeId);
+pub struct SelectedElement(pub ElementEntity);
 
 /// Fired when selected position changes
 /// TODO: MOre events for different happenings? Store related data in event?
@@ -52,7 +51,7 @@ pub struct SelectionChanged;
 fn find_targets_at_selection(
     sel_pos: Option<Res<SelectedPos>>,
     spatial_query: SpatialQuery,
-    q_map_nodes: Query<&Id>,
+    q_map_elems: Query<&ElementId>,
     sel_targets: Option<ResMut<SelectionTargets>>,
     mut commands: Commands,
 ) {
@@ -61,12 +60,12 @@ fn find_targets_at_selection(
             .point_intersections(**sel_pos, &SpatialQueryFilter::default())
             .iter()
             .filter_map(|entity_id| {
-                q_map_nodes
+                q_map_elems
                     .get(*entity_id)
                     .ok()
-                    .map(|node_id| LiveMapNodeId {
-                        node_id: *node_id,
-                        entity: *entity_id,
+                    .map(|elem_id| ElementEntity {
+                        element_id: **elem_id,
+                        entity_id: *entity_id,
                     })
             })
             .collect_vec();
@@ -124,7 +123,7 @@ fn sel_brush_test(
     mut commands: Commands,
 ) {
     if let Some(sel_targets) = sel_targets {
-        if let Ok(brush) = brushes.get(sel_targets.focused.entity) {
+        if let Ok(brush) = brushes.get(sel_targets.focused.entity_id) {
             let closest_side = brush
                 .bounds
                 .sides_world()
@@ -230,7 +229,7 @@ pub fn draw_sel_target_gizmos(
     mut gizmos: Gizmos<SelTargetGizmos>,
 ) {
     for intersecting_node in sel_target.intersecting.iter() {
-        if let Ok((coll, coll_transform)) = q_colliders.get(intersecting_node.entity) {
+        if let Ok((coll, coll_transform)) = q_colliders.get(intersecting_node.entity_id) {
             let aabb = coll.aabb(coll_transform.translation(), coll_transform.rotation());
             //.grow(Vec3::ONE * 0.01);
             //

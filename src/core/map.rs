@@ -1,389 +1,107 @@
-pub mod brush;
-mod dto;
-pub mod light;
+pub mod changes;
+pub mod elements;
+pub mod history;
+pub mod states;
 
-use avian3d::prelude::{Collider, RigidBody};
 use bevy::{
-    image::{
-        ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler,
-        ImageSamplerDescriptor,
-    },
-    input::common_conditions::{input_just_pressed, input_just_released},
+    ecs::schedule::ScheduleLabel, input::common_conditions::*, platform::collections::HashMap,
     prelude::*,
-    tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task},
 };
-use bimap::BiHashMap;
-use brush::Brush;
-use daggy::{Dag, NodeIndex, Walker};
-use light::Light;
-use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs::File, io::Write, path::PathBuf};
+use thiserror::Error;
 
 use crate::{
-    app_data::AppDataPath,
     core::{
-        binds::{Binding, InputBindingSystem},
-        map::dto::{MapDe, MapSer},
-        view::TPCameraTo,
+        binds::Binding,
+        db::{Db, Meta, TBL_META, TBL_OBJECTS},
+        map::{
+            changes::{
+                Change, ChangeSet, CreateElem,
+                NewElemId::{self, Generated},
+                PendingChanges, UpdateElemInfo,
+            },
+            elements::{
+                brush::{Brush, BrushBounds},
+                AppRoleRegistry, ElementId, ElementRoleRegistry, Info,
+            },
+            history::{HistNode, TBL_HIST_NODES},
+            states::TBL_STATES,
+        },
     },
-    editor::{update_editor_context, EditorContext},
     id::{Id, IdGen},
+    util::brush_texture_settings,
 };
 
-#[derive(Resource, Serialize, Deserialize, Clone)]
-pub struct Map {
-    state: BTreeMap<Id, MapNode>,
-    cur_delta_idx: NodeIndex<u32>,
-    delta_graph: Dag<MapDelta, ()>,
-}
-
-#[derive(Resource, Default, Deref, DerefMut)]
-pub struct MapLookup(BiHashMap<Id, Entity>);
-
-#[derive(Resource)]
-pub struct MapSession {
-    pub save_path: PathBuf,
-}
-
-#[derive(Resource)]
-pub struct MapAssets {
-    pub default_material: Handle<StandardMaterial>,
-}
-
-/// Combines node id with its instantiated entity
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LiveMapNodeId {
-    pub node_id: Id,
-    pub entity: Entity,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
-pub enum MapNode {
-    Brush(Brush),
-    Light(Light),
-}
-
-/// Represents a proposed change to the map.
 #[derive(Event)]
-pub enum MapChange {
-    Add(MapNode),
-    Modify(Id, MapNode),
-    Remove(Id),
+struct RestoreState {
+    pub id: Id,
+    pub fresh_map: bool,
 }
 
-/// A "symmetric" map change that stores enough data to be reversable.
-#[derive(Serialize, Deserialize, Clone)]
-pub enum MapDelta {
-    Nop,
-    AddNode {
-        id: Id,
-        node: MapNode,
-    },
-    ModifyNode {
-        id: Id,
-        before: MapNode,
-        after: MapNode,
-    },
-    RemoveNode {
-        id: Id,
-        node: MapNode,
-    },
-}
-
-#[derive(Debug)]
-enum MapDeltaApplyError {
-    NodeExists,
-    NodeNotFound,
-}
-
-/// Request to deploy a map node in the world. Entity id is expected to be an entity with a MapNodeId component.
-/// MapNode can be different from the one stored in the Map, to make temporary node changes in the editor.
 #[derive(Event)]
-pub struct DeployMapNode {
-    pub target_entity: Entity,
-    pub node: MapNode,
+struct JumpToHistoryNode {
+    pub id: Id,
 }
 
-impl Default for Map {
-    fn default() -> Self {
-        let mut graph: Dag<MapDelta, ()> = Dag::new();
-        let root_node = graph.add_node(MapDelta::Nop);
-        Self {
-            state: BTreeMap::new(),
-            cur_delta_idx: root_node,
-            delta_graph: graph,
-        }
-    }
-}
-
-impl Map {
-    pub fn nodes(&self) -> impl Iterator<Item = &MapNode> {
-        self.state.values()
-    }
-
-    pub fn node_ids(&self) -> impl Iterator<Item = &Id> {
-        self.state.keys()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&Id, &MapNode)> {
-        self.state.iter()
-    }
-
-    pub fn get_node(&self, id: &Id) -> Option<&MapNode> {
-        self.state.get(id)
-    }
-
-    pub fn has_node(&self, id: &Id) -> bool {
-        self.state.contains_key(id)
-    }
-
-    pub fn push(&mut self, new_delta: MapDelta) {
-        self.apply(&new_delta).unwrap();
-        let (_new_edge, new_node) = self
-            .delta_graph
-            .add_child(self.cur_delta_idx, (), new_delta);
-        self.cur_delta_idx = new_node;
-    }
-
-    // NOTE: can_undo and undo are seperate functions so that you can check if an action is
-    // possible without &mut access to the resource (to avoid triggering change detection).
-
-    pub fn can_undo(&self) -> bool {
-        self.delta_graph
-            .parents(self.cur_delta_idx)
-            .walk_next(&self.delta_graph)
-            .is_some()
-    }
-
-    pub fn undo(&mut self) {
-        let (_, parent_node_idx) = self
-            .delta_graph
-            .parents(self.cur_delta_idx)
-            .walk_next(&self.delta_graph)
-            .expect("Use can_undo() to check first");
-
-        let reverse_of_current = self
-            .delta_graph
-            .node_weight(self.cur_delta_idx)
-            .unwrap()
-            .reverse_of();
-
-        self.apply(&reverse_of_current).unwrap();
-        self.cur_delta_idx = parent_node_idx;
-    }
-
-    pub fn can_redo(&self) -> bool {
-        self.delta_graph
-            .children(self.cur_delta_idx)
-            .walk_next(&self.delta_graph)
-            .is_some()
-    }
-
-    pub fn redo(&mut self) {
-        // Assume the last child node to be most relevant change tree.
-        let (_, child_node_idx) = self
-            .delta_graph
-            .children(self.cur_delta_idx)
-            .walk_next(&self.delta_graph)
-            .expect("Use can_redo() to check first");
-
-        let child_delta = self
-            .delta_graph
-            .node_weight(child_node_idx)
-            .unwrap()
-            .clone();
-        self.apply(&child_delta).unwrap();
-        self.cur_delta_idx = child_node_idx;
-    }
-
-    fn apply(&mut self, action: &MapDelta) -> Result<(), MapDeltaApplyError> {
-        match action {
-            MapDelta::Nop => Ok(()),
-            MapDelta::AddNode { id, node } => {
-                if self.state.insert(*id, node.clone()).is_none() {
-                    Ok(())
-                } else {
-                    Err(MapDeltaApplyError::NodeExists)
-                }
-            }
-            MapDelta::ModifyNode { id, after, .. } => {
-                if let Some(node) = self.state.get_mut(id) {
-                    *node = after.clone();
-                    Ok(())
-                } else {
-                    Err(MapDeltaApplyError::NodeNotFound)
-                }
-            }
-            MapDelta::RemoveNode { id, .. } => {
-                if self.state.remove(id).is_some() {
-                    Ok(())
-                } else {
-                    Err(MapDeltaApplyError::NodeNotFound)
-                }
-            }
-        }
-    }
-}
-
-impl MapLookup {
-    pub fn node_to_entity(&self, node_id: &Id) -> Option<&Entity> {
-        self.0.get_by_left(node_id)
-    }
-
-    pub fn entity_to_node(&self, entity_id: &Entity) -> Option<&Id> {
-        self.0.get_by_right(entity_id)
-    }
-}
-
-impl MapDelta {
-    pub fn reverse_of(&self) -> MapDelta {
-        match self {
-            MapDelta::Nop => MapDelta::Nop,
-            MapDelta::AddNode { id, node } => MapDelta::RemoveNode {
-                id: *id,
-                node: node.clone(),
-            },
-            MapDelta::ModifyNode { id, before, after } => MapDelta::ModifyNode {
-                id: *id,
-                before: after.clone(),
-                after: before.clone(),
-            },
-            MapDelta::RemoveNode { id, node } => MapDelta::AddNode {
-                id: *id,
-                node: node.clone(),
-            },
-        }
-    }
-}
-
-impl MapNode {
-    pub fn name(&self) -> &'static str {
-        match self {
-            MapNode::Brush(..) => "Brush",
-            MapNode::Light(..) => "Light",
-        }
-    }
-}
-
-#[derive(Resource)]
-struct LoadingMap {
-    path: PathBuf,
-    task: Task<MapLoadResult>,
-}
-
-pub type MapLoadResult = Result<MapDe, ron::Error>;
-
-pub const MAP_FILE_EXT: &str = "mmap";
-pub const DEFAULT_MAP_NAME: &str = "map";
-
-pub fn default_map_filename() -> String {
-    format!("{}.{}", DEFAULT_MAP_NAME, MAP_FILE_EXT)
-}
-
-fn start_loading_map(data_path: Res<AppDataPath>, mut commands: Commands) {
-    let path: PathBuf = [data_path.get(), &default_map_filename()].iter().collect();
-    if path.exists() {
-        let task_owned_path = path.clone();
-        let task_pool = AsyncComputeTaskPool::get();
-        commands.insert_resource(LoadingMap {
-            path,
-            task: task_pool.spawn(load_map_async(task_owned_path)),
-        });
-    } else {
-        info!(
-            "no map file found at {}. inserting empty map",
-            path.display()
-        );
-        commands.insert_resource(Map::default());
-        commands.insert_resource(MapSession {
-            save_path: path.clone(),
-        });
-    }
-}
-
-async fn load_map_async(path: PathBuf) -> MapLoadResult {
-    let bytes = std::fs::read(path).unwrap();
-    MapDe::from_bytes(&bytes)
-}
-
-fn insert_map_when_loaded(
-    mut loading_map: ResMut<LoadingMap>,
-    mut commands: Commands,
-    mut tp_writer: EventWriter<TPCameraTo>,
-) {
-    if let Some(map_result) = block_on(future::poll_once(&mut loading_map.task)) {
-        commands.remove_resource::<LoadingMap>();
-
-        match map_result {
-            Ok(de_map) => {
-                tp_writer.write(TPCameraTo(de_map.editor_context.camera_pos));
-                commands.insert_resource(MapSession {
-                    save_path: loading_map.path.clone(),
-                });
-                commands.insert_resource(de_map.map);
-                commands.insert_resource(de_map.editor_context);
-            }
-            Err(err) => {
-                error!("Failed to load map: {}", err);
-            }
-        }
-    }
-}
-
-fn save_map(map_session: Res<MapSession>, map: Res<Map>, editor_context: Res<EditorContext>) {
-    // TODO: async, of course this would mean it can't run on AppExit.
-
-    let map_ser = MapSer {
-        map: &map,
-        editor_context: &editor_context,
-    };
-
-    let mut file = File::create(&map_session.save_path).unwrap();
-    file.write_all(&map_ser.to_bytes().unwrap()).unwrap();
-
-    info!("map saved to {:?}", map_session.save_path);
-}
-
-fn unload_map(q_live_nodes: Query<Entity, With<Id>>, mut commands: Commands) {
-    info!("unload map with {} nodes", q_live_nodes.iter().count());
-    for entity in q_live_nodes.iter() {
-        commands.entity(entity).despawn();
-    }
-    commands.remove_resource::<Map>();
-}
-
-fn init_empty_map(
-    data_path: Res<AppDataPath>,
-    map_session: Option<Res<MapSession>>,
-    mut commands: Commands,
-) {
-    commands.insert_resource(Map::default());
-    // TODO:Should probably also reset session, equivalent of "new file" in most editors
-    if map_session.is_none() {
-        commands.insert_resource(MapSession {
-            save_path: [data_path.get(), &default_map_filename()].iter().collect(),
-        });
-    }
-}
-
-fn brush_texture_settings(settings: &mut ImageLoaderSettings) {
-    *settings = ImageLoaderSettings {
-        sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::Repeat,
-            address_mode_v: ImageAddressMode::Repeat,
-            mag_filter: ImageFilterMode::Linear,
-            min_filter: ImageFilterMode::Linear,
-            ..default()
-        }),
-        ..default()
-    }
-}
-
-fn load_map_assets(
+fn new_test_map(
     asset_server: Res<AssetServer>,
     mut commands: Commands,
+    mut id_gen: ResMut<IdGen>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+) -> Result {
+    let db = Db::new();
+
+    let mut restore: Option<Id> = None;
+    if let Some(meta) = db
+        .begin_read()?
+        .open_table(TBL_META)
+        .map(|table| table.get(()).unwrap_or(None).map(|guard| guard.value()))
+        .unwrap_or(None)
+    {
+        // Load the map
+        let reader = db.begin_read()?;
+
+        let hist_node = reader
+            .open_table(TBL_HIST_NODES)?
+            .get(meta.hist_node_id)?
+            .unwrap()
+            .value();
+        restore = Some(hist_node.state_id);
+    } else {
+        // Write initial stuff
+        let writer = db.begin_write()?;
+        {
+            let mut tbl_states = writer.open_table(states::TBL_STATES)?;
+            let initial_state_id = id_gen.generate();
+            tbl_states.insert(initial_state_id, states::State::default())?;
+
+            // Initial history node
+            let mut tbl_hist = writer.open_table(history::TBL_HIST_NODES)?;
+            let initial_hist_id = id_gen.generate();
+            tbl_hist.insert(
+                initial_hist_id,
+                HistNode {
+                    timestamp: history::new_timestamp(),
+                    parent_id: None,
+                    child_ids: Vec::default(),
+                    state_id: initial_state_id,
+                },
+            )?;
+
+            // Init the object table so it exists even if no objects are written.
+            writer.open_table(TBL_OBJECTS)?;
+
+            let mut tbl_meta = writer.open_table(TBL_META)?;
+            tbl_meta.insert(
+                (),
+                Meta {
+                    name: "test map".to_string(),
+                    hist_node_id: initial_hist_id,
+                },
+            )?;
+        }
+        writer.commit()?;
+    }
+
     let texture = asset_server
         .load_with_settings("base_content/surfaces/concrete.png", brush_texture_settings);
 
@@ -397,202 +115,379 @@ fn load_map_assets(
     commands.insert_resource(MapAssets {
         default_material: material,
     });
+
+    // Command ordering is important here, db has to exist when state is restored.
+    commands.insert_resource(db);
+
+    if let Some(id) = restore {
+        commands.trigger(RestoreState {
+            id,
+            fresh_map: true,
+        });
+    }
+
+    Ok(())
 }
 
-fn apply_changes_to_map(
-    mut id_gen: ResMut<IdGen>,
-    mut mod_events: EventReader<MapChange>,
-    mut map: ResMut<Map>,
-) {
-    for mod_event in mod_events.read() {
-        let delta = match mod_event {
-            MapChange::Add(node) => MapDelta::AddNode {
-                id: id_gen.generate(),
-                node: node.clone(),
+fn new_thing(mut changes: ResMut<PendingChanges>) {
+    changes.push_many(vec![
+        CreateElem {
+            id: Generated,
+            info: Info {
+                name: "first brush".to_string(),
             },
-            MapChange::Modify(node_id, node) => {
-                let prev = map.get_node(node_id).unwrap();
-                MapDelta::ModifyNode {
-                    id: *node_id,
-                    before: prev.clone(),
-                    after: node.clone(),
-                }
-            }
-            MapChange::Remove(node_id) => {
-                let prev = map.get_node(node_id).unwrap();
-                MapDelta::RemoveNode {
-                    id: *node_id,
-                    node: prev.clone(),
-                }
-            }
-        };
-        map.push(delta);
+            params: Brush {
+                bounds: BrushBounds {
+                    start: Vec3::ZERO,
+                    end: Vec3::ONE,
+                },
+            },
+        },
+        CreateElem {
+            id: Generated,
+            info: Info {
+                name: "second brush".to_string(),
+            },
+            params: Brush {
+                bounds: BrushBounds {
+                    start: Vec3::ZERO,
+                    end: Vec3::ONE,
+                },
+            },
+        },
+    ]);
+    changes.push_single(CreateElem {
+        id: Generated,
+        info: Info {
+            name: "third brush (in its own change set)".to_string(),
+        },
+        params: Brush {
+            bounds: BrushBounds {
+                start: Vec3::ZERO,
+                end: Vec3::ONE,
+            },
+        },
+    });
+
+    info!("ok, pushed some changes.");
+}
+
+#[derive(Resource, Default)]
+pub struct ElementLookup(HashMap<Id, Entity>);
+
+#[derive(Error, Debug)]
+#[error("No entity found for {}", self.0)]
+pub struct ElementLookupError(Id);
+
+impl ElementLookup {
+    pub fn find(&self, element_id: &Id) -> Result<Entity, ElementLookupError> {
+        self.0
+            .get(element_id)
+            .copied()
+            .ok_or(ElementLookupError(*element_id))
+    }
+
+    pub fn insert(&mut self, element_id: Id, entity: Entity) {
+        self.0.insert(element_id, entity);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Id, &Entity)> {
+        self.0.iter()
     }
 }
 
-pub fn undo_map_change(mut map: ResMut<Map>) {
-    if map.can_undo() {
-        map.undo();
-    } else {
-        info!("Nothing to undo");
-    }
-}
-
-pub fn redo_map_change(mut map: ResMut<Map>) {
-    if map.can_redo() {
-        map.redo();
-    } else {
-        info!("Nothing to redo");
-    }
-}
-
-fn reflect_map_changes_in_world(
-    map: Res<Map>,
-    mut last_map: Local<Option<Map>>,
-    mut map_lookup: ResMut<MapLookup>,
-    mut deploy_events: EventWriter<DeployMapNode>,
-    mut commands: Commands,
+fn track_element_ids(
+    q_added_ids: Query<(&ElementId, Entity), Added<ElementId>>,
+    mut q_removed_ids: RemovedComponents<ElementId>,
+    mut lookup: ResMut<ElementLookup>,
 ) {
-    info!("reflecting map changes !!");
+    for (id, entity) in q_added_ids.iter() {
+        lookup.0.insert(**id, entity);
+    }
 
-    if let Some(ref last_map) = *last_map {
-        for (node_id, node) in map.iter() {
-            if let Some(last_node) = last_map.get_node(node_id) {
-                if node != last_node {
-                    // Modify
-                    let entity_id = *map_lookup
-                        .node_to_entity(node_id)
-                        .expect("Modified node should already be instantiated in world");
-                    deploy_events.write(DeployMapNode {
-                        target_entity: entity_id,
-                        node: node.clone(),
-                    });
+    for entity in q_removed_ids.read() {
+        lookup.0.retain(|_, e| *e != entity);
+    }
+}
+
+pub fn apply_pending_changes(mut pending_changes: ResMut<PendingChanges>, mut commands: Commands) {
+    let change_sets: Vec<ChangeSet> = pending_changes.drain(..).collect();
+
+    if !change_sets.is_empty() {
+        info!("collected {} change sets", change_sets.len());
+    }
+
+    for change_set in change_sets {
+        commands.run_system_cached_with(try_apply_change_set, change_set);
+    }
+}
+
+fn try_apply_change_set(change_set: In<ChangeSet>, world: &mut World) {
+    if let Err(err) = world.run_system_cached_with(apply_change_set, change_set.0) {
+        error!("Failed to apply change set: {}", err);
+        world.remove_resource::<states::State>();
+    }
+}
+
+fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
+    // TODO: Could likely be split into multiple event-triggered systems. Triggers cant return values tho
+
+    info!("apply change set: {:?}", change_set);
+    let change_set = change_set.0;
+    // Step 1: apply to world.
+    for change in change_set.changes {
+        // Quirk: apply_to_world could in theory take ownership over the "change" and prevent a
+        // clone, but it's impossible while the change is a Box<dyn Change>
+        change.apply_to_world(world);
+    }
+
+    // Step 2: create a state resource and run the snapshot schedule. other systems will fill out state.
+    let reader = world.resource::<Db>().begin_read()?;
+    let meta = reader.open_table(TBL_META)?.get(())?.unwrap().value();
+    let cur_hist = reader
+        .open_table(TBL_HIST_NODES)?
+        .get(meta.hist_node_id)?
+        .unwrap()
+        .value();
+    let cur_state = reader
+        .open_table(TBL_STATES)?
+        .get(cur_hist.state_id)?
+        .unwrap()
+        .value();
+    drop(reader);
+
+    world.insert_resource(cur_state);
+    world.run_schedule(StateSnapshot);
+    world.flush();
+
+    // Step 3: insert new state into db and create a history node.
+    let writer = world.resource::<Db>().begin_write()?;
+    let new_state_id = world.resource_mut::<IdGen>().generate();
+    let new_state = world.remove_resource::<states::State>().unwrap();
+
+    let in_scene = world.query::<&ElementId>().iter(world).len();
+    info!(
+        "total elements in state: {}, in scene: {}",
+        new_state.elements.len(),
+        in_scene
+    );
+
+    writer
+        .open_table(TBL_STATES)?
+        .insert(new_state_id, new_state)?;
+    let new_hist_id = world.resource_mut::<IdGen>().generate();
+    {
+        // Update children on the current history node first
+        let mut tbl_hist = writer.open_table(TBL_HIST_NODES)?;
+        let updated_child_ids = cur_hist
+            .child_ids
+            .iter()
+            .copied()
+            .chain(std::iter::once(new_hist_id));
+        tbl_hist.insert(
+            meta.hist_node_id,
+            HistNode {
+                child_ids: updated_child_ids.collect(),
+                ..cur_hist
+            },
+        )?;
+
+        // New hist node as child of current
+        tbl_hist.insert(
+            new_hist_id,
+            HistNode {
+                timestamp: history::new_timestamp(),
+                parent_id: Some(meta.hist_node_id),
+                child_ids: Vec::new(),
+                state_id: new_state_id,
+            },
+        )?;
+    }
+    writer.commit()?;
+    world.trigger(UpdateCurrentHistNode(new_hist_id));
+    info!(
+        "created a new hist node {} for new state {}",
+        new_hist_id, new_state_id
+    );
+
+    // TODO: Here might be a good place to clean up the history, preventing file bloat.
+
+    Ok(())
+}
+
+fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
+    info!("restoring state {}", trigger.id);
+
+    let reader = world.resource::<Db>().begin_read()?;
+
+    // Need to grab current state from db for easier comparisons..
+    let meta = reader.open_table(TBL_META)?.get(())?.unwrap().value();
+    let cur_hist_node = reader
+        .open_table(TBL_HIST_NODES)?
+        .get(meta.hist_node_id)?
+        .unwrap()
+        .value();
+    let states = reader.open_table(TBL_STATES)?;
+    let cur_state = states.get(cur_hist_node.state_id)?.unwrap().value();
+    let state_to_restore = reader
+        .open_table(TBL_STATES)?
+        .get(trigger.id)?
+        .unwrap()
+        .value();
+
+    let objs = reader.open_table(TBL_OBJECTS)?;
+    for (elem_id, elem) in state_to_restore.elements.iter() {
+        let info = objs.get(&elem.info)?.unwrap().value().cast::<Info>();
+        let params = objs.get(&elem.params)?.unwrap().value();
+
+        world.resource_scope(|world: &mut World, registry: Mut<ElementRoleRegistry>| {
+            let builder = registry.roles.get(&elem.role.unwrap()).unwrap();
+            if let Some(cur_elem) = (!trigger.fresh_map)
+                .then(|| cur_state.elements.get(elem_id))
+                .flatten()
+            {
+                info!("element is in cur state: {}", elem_id);
+                if elem.info != cur_elem.info {
+                    UpdateElemInfo {
+                        elem_id: *elem_id,
+                        new_info: info,
+                    }
+                    .apply_to_world(world);
+                }
+                if elem.params != cur_elem.params {
+                    builder.build_update(*elem_id, params).apply_to_world(world);
                 }
             } else {
-                // Add
-                let entity_id = commands.spawn(*node_id).id();
-                map_lookup.insert(*node_id, entity_id);
-                deploy_events.write(DeployMapNode {
-                    target_entity: entity_id,
-                    node: node.clone(),
-                });
+                // Create
+                info!("element is NOT cur state and will be created: {}", elem_id);
+                builder
+                    .build_create(NewElemId::Loaded(*elem_id), info, params)
+                    .apply_to_world(world);
             }
-        }
-
-        let removed_node_entities: Vec<Entity> = last_map
-            .node_ids()
-            .filter(|id| !map.has_node(id))
-            .filter_map(|id| map_lookup.node_to_entity(id))
-            .cloned()
-            .collect();
-
-        for entity in removed_node_entities {
-            commands.entity(entity).despawn();
-            map_lookup.remove_by_right(&entity);
-        }
-    } else {
-        // Nothing to compare with, add all.
-        for (node_id, node) in map.iter() {
-            let entity_id = commands.spawn(*node_id).id();
-            map_lookup.insert(*node_id, entity_id);
-            deploy_events.write(DeployMapNode {
-                target_entity: entity_id,
-                node: node.clone(),
-            });
-            info!("add (nothing b4) {}", entity_id);
-        }
+        });
     }
 
-    *last_map = Some(map.clone());
+    // Remove elems not in the state
+    // NOTE: This could also use a query over ElementId, idk which is faster.
+    let to_despawn: Vec<Entity> = world
+        .resource::<ElementLookup>()
+        .iter()
+        .flat_map(|(id, entity)| (!state_to_restore.elements.contains_key(id)).then_some(*entity))
+        .collect();
+
+    for entity in to_despawn {
+        info!("despawn: {}", entity);
+        world.despawn(entity);
+    }
+
+    Ok(())
 }
 
-fn deploy_nodes(
-    map_assets: Res<MapAssets>,
-    mut deploy_events: EventReader<DeployMapNode>,
+fn jump_to_hist_node(
+    trigger: Trigger<JumpToHistoryNode>,
+    db: Res<Db>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-) {
-    for event in deploy_events.read() {
-        let mut entity_commands = commands.entity(event.target_entity);
-        entity_commands.despawn_related::<Children>();
-        // NOTE: When this is applied, the Children component will be gone, so it's important to
-        // despawn descendants BEFORE retaining.
-        entity_commands.retain::<Id>();
+) -> Result {
+    let reader = db.begin_read()?;
+    let hist_node = reader
+        .open_table(TBL_HIST_NODES)?
+        .get(trigger.id)?
+        .unwrap()
+        .value();
+    commands.trigger(RestoreState {
+        id: hist_node.state_id,
+        fresh_map: false,
+    });
+    commands.trigger(UpdateCurrentHistNode(trigger.id));
 
-        // Once this match is stupid large it should be split up. Perhaps using observer pattern,
-        // fire an event using MapNodeKind generic. Register listeners for each kind.
-        match &event.node {
-            MapNode::Light(ref light) => {
-                entity_commands.insert((
-                    Transform::from_translation(light.position),
-                    match light.light_type {
-                        light::LightType::Point => PointLight {
-                            color: light.color,
-                            intensity: light.intensity,
-                            range: light.range,
-                            ..default()
-                        },
-                        light::LightType::Spot => {
-                            unimplemented!("u would have to rotate it n shit")
-                        }
-                    },
-                ));
-            }
-            MapNode::Brush(ref brush) => {
-                // Brush will use base entity as a container for sides.
-                let center = brush.bounds.center();
-                let size = brush.bounds.size();
-
-                entity_commands.insert((
-                    brush.clone(),
-                    Transform::IDENTITY.with_translation(center),
-                    RigidBody::Static,
-                    Collider::cuboid(size.x, size.y, size.z),
-                ));
-
-                for side in brush.bounds.sides_local() {
-                    entity_commands.with_child((
-                        Transform::IDENTITY.with_translation(side.pos),
-                        Mesh3d(meshes.add(side.mesh())),
-                        //MeshMaterial3d(materials.add(color)),
-                        MeshMaterial3d(map_assets.default_material.clone()),
-                    ));
-                }
-            }
-        }
-    }
+    Ok(())
 }
+
+#[derive(Event)]
+pub struct UpdateCurrentHistNode(Id);
+
+fn update_cur_hist_node(trigger: Trigger<UpdateCurrentHistNode>, db: Res<Db>) -> Result {
+    let reader = db.begin_read()?;
+    let meta = reader.open_table(TBL_META)?.get(())?.unwrap().value();
+
+    let writer = db.begin_write()?;
+    writer.open_table(TBL_META)?.insert(
+        (),
+        Meta {
+            hist_node_id: trigger.0,
+            ..meta
+        },
+    )?;
+    writer.commit()?;
+    Ok(())
+}
+
+fn undo(db: Res<Db>, mut commands: Commands) -> Result {
+    let reader = db.begin_read()?;
+    let meta = reader.open_table(TBL_META)?.get(())?.unwrap().value();
+    let cur_hist_node = reader
+        .open_table(TBL_HIST_NODES)?
+        .get(meta.hist_node_id)?
+        .unwrap()
+        .value();
+    if let Some(parent_hist_node_id) = cur_hist_node.parent_id {
+        commands.trigger(JumpToHistoryNode {
+            id: parent_hist_node_id,
+        });
+        info!("doing an undo");
+    } else {
+        info!("not doing an undo - no parent on this hist node");
+    }
+    Ok(())
+}
+
+fn redo(db: Res<Db>, mut commands: Commands) -> Result {
+    let reader = db.begin_read()?;
+    let meta = reader.open_table(TBL_META)?.get(())?.unwrap().value();
+    let cur_hist_node = reader
+        .open_table(TBL_HIST_NODES)?
+        .get(meta.hist_node_id)?
+        .unwrap()
+        .value();
+    if let Some(last_child_if_hist_node) = cur_hist_node.child_ids.last() {
+        commands.trigger(JumpToHistoryNode {
+            id: *last_child_if_hist_node,
+        });
+        info!("doing a redo");
+    } else {
+        info!("not doing a redo - no children on this hist node");
+    }
+    Ok(())
+}
+
+#[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StateSnapshot;
 
 pub fn plugin(app: &mut App) {
-    app.add_event::<MapChange>()
-        .add_event::<DeployMapNode>()
-        .init_resource::<MapLookup>()
-        .add_systems(Startup, (init_empty_map, start_loading_map))
-        .add_systems(
-            PreUpdate,
-            (
-                (init_empty_map)
-                    .chain()
-                    .run_if(input_just_released(KeyCode::KeyR)),
-                undo_map_change.run_if(input_just_pressed(Binding::Undo)),
-                redo_map_change.run_if(input_just_pressed(Binding::Redo)),
-                save_map.run_if(input_just_pressed(Binding::Save)),
-            )
-                .after(InputBindingSystem),
-        )
-        .add_systems(
-            Update,
-            (
-                load_map_assets.run_if(resource_added::<Map>),
-                (update_editor_context, save_map)
-                    .chain()
-                    .run_if(resource_exists::<Map>.and(on_event::<AppExit>)),
-                insert_map_when_loaded.run_if(resource_exists::<LoadingMap>),
-                apply_changes_to_map.run_if(resource_exists::<Map>),
-                reflect_map_changes_in_world.run_if(resource_exists_and_changed::<Map>),
-                deploy_nodes
-                    .after(reflect_map_changes_in_world)
-                    .after(load_map_assets),
-            ),
-        );
+    app.add_schedule(Schedule::new(StateSnapshot));
+    app.add_plugins(states::plugin);
+    app.init_resource::<IdGen>();
+    app.init_resource::<ElementLookup>();
+    app.init_resource::<PendingChanges>();
+    app.add_systems(Startup, new_test_map);
+    app.add_systems(
+        Update,
+        (
+            new_thing.run_if(input_just_pressed(KeyCode::KeyF)),
+            undo.run_if(input_just_pressed(Binding::Undo)),
+            redo.run_if(input_just_pressed(Binding::Redo)),
+            track_element_ids,
+        ),
+    );
+    app.add_systems(Last, apply_pending_changes);
+    app.add_observer(restore_state);
+    app.add_observer(jump_to_hist_node);
+    app.add_observer(update_cur_hist_node);
+    app.init_resource::<ElementRoleRegistry>();
+    app.register_map_element_role::<Brush>();
+}
+
+#[derive(Resource)]
+pub struct MapAssets {
+    pub default_material: Handle<StandardMaterial>,
 }

@@ -3,11 +3,12 @@ use redb::TableDefinition;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::map::brush::Brush,
-    experimental::map::{
+    core::{
         db::{Checksum, Db, Object, Typed, TBL_OBJECTS},
-        elements::{ElementId, Info, Role},
-        StateSnapshot,
+        map::{
+            elements::{brush::Brush, ElementId, Info, Role},
+            StateSnapshot,
+        },
     },
     id::Id,
 };

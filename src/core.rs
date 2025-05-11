@@ -1,4 +1,5 @@
 pub mod binds;
+pub mod db;
 pub mod map;
 pub mod media;
 pub mod view;

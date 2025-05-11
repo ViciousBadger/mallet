@@ -1,7 +1,7 @@
 use redb::TableDefinition;
 use serde::{Deserialize, Serialize};
 
-use crate::{experimental::map::db::Typed, id::Id};
+use crate::{core::db::Typed, id::Id};
 
 pub const TBL_HIST_NODES: TableDefinition<Id, Typed<HistNode>> = TableDefinition::new("hist_nodes");
 

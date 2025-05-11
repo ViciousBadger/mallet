@@ -1,3 +1,6 @@
+pub mod brush;
+pub mod light;
+
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     marker::PhantomData,
@@ -7,10 +10,10 @@ use bevy::{platform::collections::HashMap, prelude::*};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    core::map::{brush::Brush, light::Light},
-    experimental::map::{
+    core::db::Object,
+    core::map::{
         changes::{Change, CreateElem, NewElemId, UpdateElemParams},
-        db::Object,
+        elements::{brush::Brush, light::Light},
     },
     id::Id,
 };
@@ -25,6 +28,12 @@ impl ElementId {
     pub fn id_ref(&self) -> &Id {
         &self.0
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ElementEntity {
+    pub element_id: Id,
+    pub entity_id: Entity,
 }
 
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]

@@ -2,9 +2,8 @@ use avian3d::prelude::{Collider, RigidBody};
 use bevy::prelude::*;
 
 use crate::{
-    core::map::{brush::Brush, light::Light},
-    experimental::map::{
-        elements::{ElementId, Info, Role},
+    core::map::{
+        elements::{brush::Brush, light::Light, ElementId, Info, Role},
         ElementLookup, MapAssets,
     },
     id::{Id, IdGen},
