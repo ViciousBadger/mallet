@@ -1,3 +1,4 @@
+use avian3d::prelude::*;
 use bevy::{
     asset::RenderAssetUsages,
     prelude::*,
@@ -8,7 +9,13 @@ use bevy::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::util::Facing3d;
+use crate::{
+    core::map::{
+        changes::{Change, UpdateElemParams},
+        ElementLookup, MapAssets,
+    },
+    util::Facing3d,
+};
 
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[require(Visibility, Transform)]
@@ -161,19 +168,50 @@ impl MeshBuilder for BrushSideMeshBuilder {
     }
 }
 
-// pub fn deploy_brushes(
-//     map_assets: Res<MapAssets>,
-//     q_brushes: Query<(&Id, &Brush)>,
-//     mut deploy_events: EventReader<DeployMapNode>,
-//     mut commands: Commands,
-//     mut meshes: ResMut<Assets<Mesh>>,
-// ) {
-//     // TODO: insert the "inner" component of the mapnode before deploy
-//     // (source of truth = component) ??!???!?! confuse
-//     for event in deploy_events.read() {
-//         if let Ok((id, brush)) = q_brushes.get(event.target_entity) {
-//             info!("yee");
-//         }
-//         //if let MapNode::Brush(brush) = &event.node {}
-//     }
-// }
+impl Change for UpdateElemParams<Brush> {
+    fn apply_to_world(&self, world: &mut World) {
+        world
+            .run_system_cached_with(
+                |change: In<Self>,
+                 lookup: Res<ElementLookup>,
+                 map_assets: Res<MapAssets>,
+                 mut meshes: ResMut<Assets<Mesh>>,
+                 mut commands: Commands|
+                 -> Result {
+                    let entity_id = lookup.find(&change.elem_id)?;
+                    let mut entity = commands.entity(entity_id);
+                    //let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
+                    let brush = change.new_params.clone();
+
+                    info!("spawning/updating brush: {:?}", brush);
+
+                    // Brush will use base entity as a container for sides.
+                    let center = brush.bounds.center();
+                    let size = brush.bounds.size();
+
+                    entity.insert((
+                        brush.clone(),
+                        Transform::IDENTITY.with_translation(center),
+                        RigidBody::Static,
+                        Collider::cuboid(size.x, size.y, size.z),
+                    ));
+                    entity.despawn_related::<Children>();
+                    entity.with_children(|cmds| {
+                        for side in brush.bounds.sides_local() {
+                            let mesh = meshes.add(side.mesh());
+                            let material = map_assets.default_material.clone();
+                            cmds.spawn((
+                                Transform::IDENTITY.with_translation(side.pos),
+                                Mesh3d(mesh),
+                                MeshMaterial3d(material),
+                            ));
+                        }
+                    });
+                    Ok(())
+                },
+                self.clone(),
+            )
+            .expect("error running system")
+            .expect("system returned an error");
+    }
+}
