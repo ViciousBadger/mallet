@@ -146,19 +146,19 @@ fn gimbal_parent_rotation(
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_event::<TPCameraTo>()
-        .add_systems(
-            PreUpdate,
-            (
-                gimbal_mouse_input.run_if(
-                    on_event::<MouseMotion>
-                        .and(in_state(AppState::InGame).or(in_state(FreelookState::Locked))),
-                ),
-                gimbal_binding_input,
-                gimbal_limit,
-            )
-                .chain()
-                .after(InputBindingSystem),
+    app.add_event::<TPCameraTo>();
+    app.add_systems(
+        PreUpdate,
+        (
+            gimbal_mouse_input.run_if(
+                on_event::<MouseMotion>
+                    .and(in_state(AppState::InGame).or(in_state(FreelookState::Locked))),
+            ),
+            gimbal_binding_input,
+            gimbal_limit,
         )
-        .add_systems(Update, (gimbal_rotation, gimbal_parent_rotation, teleport));
+            .chain()
+            .after(InputBindingSystem),
+    );
+    app.add_systems(Update, (gimbal_rotation, gimbal_parent_rotation, teleport));
 }
