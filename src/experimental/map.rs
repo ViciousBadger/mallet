@@ -201,6 +201,8 @@ fn try_apply_change_set(change_set: In<ChangeSet>, world: &mut World) {
 }
 
 fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
+    // TODO: Could likely be split into multiple event-triggered systems. Triggers cant return values tho
+
     info!("apply change set: {:?}", change_set);
     let change_set = change_set.0;
     // Step 1: apply to world.
@@ -272,14 +274,8 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
             },
         )?;
     }
-    writer.open_table(TBL_META)?.insert(
-        (),
-        Meta {
-            hist_node_id: new_hist_id,
-            ..meta
-        },
-    )?;
     writer.commit()?;
+    world.trigger(UpdateCurrentHistNode(new_hist_id));
     info!(
         "created a new hist node {} for new state {}",
         new_hist_id, new_state_id
@@ -294,34 +290,44 @@ fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
     info!("restoring state {}", trigger.id);
 
     let reader = world.resource::<Db>().begin_read()?;
-    let state = reader
+
+    // Need to grab current state from db for easier comparisons..
+    let meta = reader.open_table(TBL_META)?.get(())?.unwrap().value();
+    let cur_hist_node = reader
+        .open_table(TBL_HIST_NODES)?
+        .get(meta.hist_node_id)?
+        .unwrap()
+        .value();
+    let states = reader.open_table(TBL_STATES)?;
+    let cur_state = states.get(cur_hist_node.state_id)?.unwrap().value();
+    let state_to_restore = reader
         .open_table(TBL_STATES)?
         .get(trigger.id)?
         .unwrap()
         .value();
 
     let objs = reader.open_table(TBL_OBJECTS)?;
-    for (elem_id, elem) in state.elements.iter() {
+    for (elem_id, elem) in state_to_restore.elements.iter() {
         let info = objs.get(&elem.info)?.unwrap().value().cast::<Info>();
         let params = objs.get(&elem.params)?.unwrap().value();
 
         world.resource_scope(|world: &mut World, registry: Mut<ElementRoleRegistry>| {
             let builder = registry.roles.get(&elem.role.unwrap()).unwrap();
-
-            if world.resource::<ElementLookup>().find(elem_id).is_ok() {
-                // TODO: only update if changed? should checksums be stored as component? its the
-                // only ez way to compare the role params since they are generic. but doing so
-                // makes the code in changes uglier  iguess. every impl would have to update the
-                // checksums appropriately.
-
-                UpdateElemInfo {
-                    elem_id: *elem_id,
-                    new_info: info,
+            if let Some(cur_elem) = cur_state.elements.get(elem_id) {
+                info!("element is in cur state: {}", elem_id);
+                if elem.info != cur_elem.info {
+                    UpdateElemInfo {
+                        elem_id: *elem_id,
+                        new_info: info,
+                    }
+                    .apply_to_world(world);
                 }
-                .apply_to_world(world);
-                builder.build_update(*elem_id, params).apply_to_world(world);
+                if elem.params != cur_elem.params {
+                    builder.build_update(*elem_id, params).apply_to_world(world);
+                }
             } else {
                 // Create
+                info!("element is NOT cur state and will be created: {}", elem_id);
                 builder
                     .build_create(NewElemId::Loaded(*elem_id), info, params)
                     .apply_to_world(world);
@@ -334,7 +340,7 @@ fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
     let to_despawn: Vec<Entity> = world
         .resource::<ElementLookup>()
         .iter()
-        .flat_map(|(id, entity)| (!state.elements.contains_key(id)).then_some(*entity))
+        .flat_map(|(id, entity)| (!state_to_restore.elements.contains_key(id)).then_some(*entity))
         .collect();
 
     for entity in to_despawn {
@@ -351,26 +357,35 @@ fn jump_to_hist_node(
     mut commands: Commands,
 ) -> Result {
     let reader = db.begin_read()?;
-    let meta = reader.open_table(TBL_META)?.get(())?.unwrap().value();
     let hist_node = reader
         .open_table(TBL_HIST_NODES)?
         .get(trigger.id)?
         .unwrap()
         .value();
-    drop(reader);
     commands.trigger(RestoreState {
         id: hist_node.state_id,
     });
+    commands.trigger(UpdateCurrentHistNode(trigger.id));
+
+    Ok(())
+}
+
+#[derive(Event)]
+pub struct UpdateCurrentHistNode(Id);
+
+fn update_cur_hist_node(trigger: Trigger<UpdateCurrentHistNode>, db: Res<Db>) -> Result {
+    let reader = db.begin_read()?;
+    let meta = reader.open_table(TBL_META)?.get(())?.unwrap().value();
+
     let writer = db.begin_write()?;
     writer.open_table(TBL_META)?.insert(
         (),
         Meta {
-            hist_node_id: trigger.id,
+            hist_node_id: trigger.0,
             ..meta
         },
     )?;
     writer.commit()?;
-
     Ok(())
 }
 
@@ -434,6 +449,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Last, apply_pending_changes);
     app.add_observer(restore_state);
     app.add_observer(jump_to_hist_node);
+    app.add_observer(update_cur_hist_node);
     app.init_resource::<ElementRoleRegistry>();
     app.register_map_element_role::<Brush>();
 }
