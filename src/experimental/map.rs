@@ -18,17 +18,19 @@ use crate::{
             NewElemId::{self, Generated},
             PendingChanges, UpdateElemInfo,
         },
-        db::{Db, Meta, Object, TBL_META, TBL_OBJECTS},
+        db::{Db, Meta, TBL_META, TBL_OBJECTS},
         elements::{AppRoleRegistry, ElementId, ElementRoleRegistry, Info},
         history::{HistNode, TBL_HIST_NODES},
         states::TBL_STATES,
     },
     id::{Id, IdGen},
+    util::brush_texture_settings,
 };
 
 #[derive(Event)]
 struct RestoreState {
     pub id: Id,
+    pub fresh_map: bool,
 }
 
 #[derive(Event)]
@@ -36,7 +38,12 @@ struct JumpToHistoryNode {
     pub id: Id,
 }
 
-fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
+fn new_test_map(
+    asset_server: Res<AssetServer>,
+    mut commands: Commands,
+    mut id_gen: ResMut<IdGen>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) -> Result {
     let db = Db::new();
 
     let mut restore: Option<Id> = None;
@@ -91,12 +98,30 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
         writer.commit()?;
     }
 
+    let texture = asset_server
+        .load_with_settings("base_content/surfaces/concrete.png", brush_texture_settings);
+
+    let material = materials.add(StandardMaterial {
+        base_color_texture: Some(texture),
+        perceptual_roughness: 1.0,
+        reflectance: 0.0,
+        ..default()
+    });
+
+    commands.insert_resource(MapAssets {
+        default_material: material,
+    });
+
     // Command ordering is important here, db has to exist when state is restored.
     commands.insert_resource(db);
 
     if let Some(id) = restore {
-        commands.trigger(RestoreState { id });
+        commands.trigger(RestoreState {
+            id,
+            fresh_map: true,
+        });
     }
+
     Ok(())
 }
 
@@ -313,7 +338,10 @@ fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
 
         world.resource_scope(|world: &mut World, registry: Mut<ElementRoleRegistry>| {
             let builder = registry.roles.get(&elem.role.unwrap()).unwrap();
-            if let Some(cur_elem) = cur_state.elements.get(elem_id) {
+            if let Some(cur_elem) = (!trigger.fresh_map)
+                .then(|| cur_state.elements.get(elem_id))
+                .flatten()
+            {
                 info!("element is in cur state: {}", elem_id);
                 if elem.info != cur_elem.info {
                     UpdateElemInfo {
@@ -364,6 +392,7 @@ fn jump_to_hist_node(
         .value();
     commands.trigger(RestoreState {
         id: hist_node.state_id,
+        fresh_map: false,
     });
     commands.trigger(UpdateCurrentHistNode(trigger.id));
 
@@ -452,4 +481,9 @@ pub fn plugin(app: &mut App) {
     app.add_observer(update_cur_hist_node);
     app.init_resource::<ElementRoleRegistry>();
     app.register_map_element_role::<Brush>();
+}
+
+#[derive(Resource)]
+pub struct MapAssets {
+    pub default_material: Handle<StandardMaterial>,
 }

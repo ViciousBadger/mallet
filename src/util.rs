@@ -1,5 +1,9 @@
 use avian3d::math::Quaternion;
 use bevy::{
+    image::{
+        ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler,
+        ImageSamplerDescriptor,
+    },
     prelude::*,
     state::state::FreelyMutableState,
     window::{CursorGrabMode, PrimaryWindow},
@@ -63,4 +67,17 @@ where
     T: Copy + Eq + core::hash::Hash + Send + Sync + 'static,
 {
     move |inputs: Res<ButtonInput<T>>| inputs.just_pressed(input) || inputs.just_released(input)
+}
+
+pub fn brush_texture_settings(settings: &mut ImageLoaderSettings) {
+    *settings = ImageLoaderSettings {
+        sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+            address_mode_u: ImageAddressMode::Repeat,
+            address_mode_v: ImageAddressMode::Repeat,
+            mag_filter: ImageFilterMode::Linear,
+            min_filter: ImageFilterMode::Linear,
+            ..default()
+        }),
+        ..default()
+    }
 }

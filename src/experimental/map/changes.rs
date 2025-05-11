@@ -1,10 +1,11 @@
+use avian3d::prelude::{Collider, RigidBody};
 use bevy::prelude::*;
 
 use crate::{
     core::map::{brush::Brush, light::Light},
     experimental::map::{
         elements::{ElementId, Info, Role},
-        ElementLookup,
+        ElementLookup, MapAssets,
     },
     id::{Id, IdGen},
 };
@@ -110,7 +111,6 @@ pub struct UpdateElemInfo {
     pub new_info: Info,
 }
 
-// TODO: use CreateOrUpdate? create if nto exist, update if exist.
 impl Change for UpdateElemInfo {
     fn apply_to_world(&self, world: &mut World) {
         let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
@@ -119,7 +119,7 @@ impl Change for UpdateElemInfo {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UpdateElemParams<R> {
     pub elem_id: Id,
     pub new_params: R,
@@ -127,9 +127,49 @@ pub struct UpdateElemParams<R> {
 
 impl Change for UpdateElemParams<Brush> {
     fn apply_to_world(&self, world: &mut World) {
-        let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
-        entity.insert(self.new_params.clone());
-        info!("applied updateelemparams for Brush");
+        world
+            .run_system_cached_with(
+                |change: In<Self>,
+                 lookup: Res<ElementLookup>,
+                 map_assets: Res<MapAssets>,
+                 mut meshes: ResMut<Assets<Mesh>>,
+                 mut commands: Commands|
+                 -> Result {
+                    let entity_id = lookup.find(&change.elem_id)?;
+                    let mut entity = commands.entity(entity_id);
+                    //let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
+                    let brush = change.new_params.clone();
+                    // entity.insert(brush.clone());
+
+                    // Brush will use base entity as a container for sides.
+                    let center = brush.bounds.center();
+                    let size = brush.bounds.size();
+
+                    entity.insert((
+                        brush.clone(),
+                        Transform::IDENTITY.with_translation(center),
+                        RigidBody::Static,
+                        Collider::cuboid(size.x, size.y, size.z),
+                    ));
+
+                    for side in brush.bounds.sides_local() {
+                        let mesh = meshes.add(side.mesh());
+                        let material = map_assets.default_material.clone();
+                        entity.with_child((
+                            Transform::IDENTITY.with_translation(side.pos),
+                            Mesh3d(mesh),
+                            //MeshMaterial3d(materials.add(color)),
+                            MeshMaterial3d(material),
+                        ));
+                    }
+
+                    info!("applied updateelemparams for Brush :O it runs as a cached system");
+                    Ok(())
+                },
+                self.clone(),
+            )
+            .expect("error running system")
+            .expect("system returned an error");
     }
 }
 

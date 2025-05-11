@@ -24,6 +24,7 @@ pub struct State {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ElementState {
+    // TODO: role shoudl probably not be optional, forced by the decoupling here.
     /// used to insert/update the correct kind of element when restoring a state
     pub role: Option<u64>,
     pub info: Checksum,

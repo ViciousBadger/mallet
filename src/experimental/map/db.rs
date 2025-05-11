@@ -237,33 +237,3 @@ where
         TypeName::new(&format!("Card<{}>", std::any::type_name::<T>()))
     }
 }
-
-// pub trait EzRead<K: 'static + redb::Key, V: 'static + redb::Value> {
-//     fn get_from<'a>(
-//         &self,
-//         table: TableDefinition<K, V>,
-//         key: impl Borrow<K::SelfType<'a>>,
-//     ) -> Result<Option<V>>;
-// }
-//
-// impl<'a, K, V> EzRead<K, V> for ReadTransaction
-// where
-//     K: 'static + redb::Key,
-//     V: 'static + redb::Value<SelfType<'a> = V>,
-// {
-//     fn get_from<'b>(
-//         &self,
-//         table: TableDefinition<K, V>,
-//         key: impl Borrow<K::SelfType<'b>>,
-//     ) -> Result<Option<V::SelfType<'a>>> {
-//         Ok(self.open_table(table)?.get(key)?.map(|guard| guard.value()))
-//     }
-// }
-//
-// pub trait EzWrite {
-//     fn insert_into<'a, K: redb::Key + 'static, V: redb::Value + 'static>(
-//         &self,
-//         table: TableDefinition<K, V>,
-//         key: impl Borrow<K::SelfType<'a>>,
-//     );
-// }
