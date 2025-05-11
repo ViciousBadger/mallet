@@ -1,10 +1,9 @@
-use avian3d::prelude::{Collider, RigidBody};
 use bevy::prelude::*;
 
 use crate::{
     core::map::{
-        elements::{brush::Brush, light::Light, ElementId, Info, Role},
-        ElementLookup, MapAssets,
+        elements::{ElementId, Info, Role},
+        ElementLookup,
     },
     id::{Id, IdGen},
 };
@@ -56,22 +55,22 @@ pub fn get_elem_entity<'a>(world: &'a mut World, elem_id: &Id) -> Option<EntityW
 
 #[derive(Debug)]
 pub struct CreateElem<R> {
-    pub id: NewElemId,
+    pub id: CreateId,
     pub info: Info,
     pub params: R,
 }
 
 #[derive(Debug)]
-pub enum NewElemId {
+pub enum CreateId {
     Loaded(Id),
     Generated,
 }
 
-impl NewElemId {
+impl CreateId {
     pub fn loaded_id_or_none(&self) -> Option<Id> {
         match self {
-            NewElemId::Loaded(id) => Some(*id),
-            NewElemId::Generated => None,
+            CreateId::Loaded(id) => Some(*id),
+            CreateId::Generated => None,
         }
     }
 }
@@ -97,7 +96,7 @@ where
         .apply_to_world(world);
         UpdateElemParams {
             elem_id: id,
-            new_params: self.params.clone(),
+            params: self.params.clone(),
         }
         .apply_to_world(world);
         info!("applied create for a generic elem role :)");
@@ -121,22 +120,15 @@ impl Change for UpdateElemInfo {
 #[derive(Debug, Clone)]
 pub struct UpdateElemParams<R> {
     pub elem_id: Id,
-    pub new_params: R,
-}
-
-impl Change for UpdateElemParams<Light> {
-    fn apply_to_world(&self, world: &mut World) {
-        let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
-        entity.insert(self.new_params.clone());
-    }
+    pub params: R,
 }
 
 #[derive(Debug)]
-pub struct RemoveElem {
+pub struct RemoveElement {
     pub elem_id: Id,
 }
 
-impl Change for RemoveElem {
+impl Change for RemoveElement {
     fn apply_to_world(&self, world: &mut World) {
         get_elem_entity(world, &self.elem_id).unwrap().despawn();
     }

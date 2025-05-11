@@ -65,7 +65,7 @@ fn find_targets_at_selection(
                     .ok()
                     .map(|elem_id| ElementEntity {
                         element_id: **elem_id,
-                        entity_id: *entity_id,
+                        entity: *entity_id,
                     })
             })
             .collect_vec();
@@ -123,7 +123,7 @@ fn sel_brush_test(
     mut commands: Commands,
 ) {
     if let Some(sel_targets) = sel_targets {
-        if let Ok(brush) = brushes.get(sel_targets.focused.entity_id) {
+        if let Ok(brush) = brushes.get(sel_targets.focused.entity) {
             let closest_side = brush
                 .bounds
                 .sides_world()
@@ -229,7 +229,7 @@ pub fn draw_sel_target_gizmos(
     mut gizmos: Gizmos<SelTargetGizmos>,
 ) {
     for intersecting_node in sel_target.intersecting.iter() {
-        if let Ok((coll, coll_transform)) = q_colliders.get(intersecting_node.entity_id) {
+        if let Ok((coll, coll_transform)) = q_colliders.get(intersecting_node.entity) {
             let aabb = coll.aabb(coll_transform.translation(), coll_transform.rotation());
             //.grow(Vec3::ONE * 0.01);
             //

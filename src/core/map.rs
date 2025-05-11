@@ -16,11 +16,12 @@ use crate::{
         map::{
             changes::{
                 Change, ChangeSet, CreateElem,
-                NewElemId::{self, Generated},
+                CreateId::{self, Generated},
                 PendingChanges, UpdateElemInfo,
             },
             elements::{
                 brush::{Brush, BrushBounds},
+                light::Light,
                 AppRoleRegistry, ElementId, ElementRoleRegistry, Info,
             },
             history::{HistNode, TBL_HIST_NODES},
@@ -42,7 +43,45 @@ struct JumpToHistoryNode {
     pub id: Id,
 }
 
-fn new_test_map(
+#[derive(Resource, Default)]
+pub struct ElementLookup(HashMap<Id, Entity>);
+
+#[derive(Error, Debug)]
+#[error("No entity found for {}", self.0)]
+pub struct ElementLookupError(Id);
+
+impl ElementLookup {
+    pub fn find(&self, element_id: &Id) -> Result<Entity, ElementLookupError> {
+        self.0
+            .get(element_id)
+            .copied()
+            .ok_or(ElementLookupError(*element_id))
+    }
+
+    pub fn insert(&mut self, element_id: Id, entity: Entity) {
+        self.0.insert(element_id, entity);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Id, &Entity)> {
+        self.0.iter()
+    }
+}
+
+fn track_element_ids(
+    q_added_ids: Query<(&ElementId, Entity), Added<ElementId>>,
+    mut q_removed_ids: RemovedComponents<ElementId>,
+    mut lookup: ResMut<ElementLookup>,
+) {
+    for (id, entity) in q_added_ids.iter() {
+        lookup.0.insert(**id, entity);
+    }
+
+    for entity in q_removed_ids.read() {
+        lookup.0.retain(|_, e| *e != entity);
+    }
+}
+
+fn init_map(
     asset_server: Res<AssetServer>,
     mut commands: Commands,
     mut id_gen: ResMut<IdGen>,
@@ -127,87 +166,6 @@ fn new_test_map(
     }
 
     Ok(())
-}
-
-fn new_thing(mut changes: ResMut<PendingChanges>) {
-    changes.push_many(vec![
-        CreateElem {
-            id: Generated,
-            info: Info {
-                name: "first brush".to_string(),
-            },
-            params: Brush {
-                bounds: BrushBounds {
-                    start: Vec3::ZERO,
-                    end: Vec3::ONE,
-                },
-            },
-        },
-        CreateElem {
-            id: Generated,
-            info: Info {
-                name: "second brush".to_string(),
-            },
-            params: Brush {
-                bounds: BrushBounds {
-                    start: Vec3::ZERO,
-                    end: Vec3::ONE,
-                },
-            },
-        },
-    ]);
-    changes.push_single(CreateElem {
-        id: Generated,
-        info: Info {
-            name: "third brush (in its own change set)".to_string(),
-        },
-        params: Brush {
-            bounds: BrushBounds {
-                start: Vec3::ZERO,
-                end: Vec3::ONE,
-            },
-        },
-    });
-
-    info!("ok, pushed some changes.");
-}
-
-#[derive(Resource, Default)]
-pub struct ElementLookup(HashMap<Id, Entity>);
-
-#[derive(Error, Debug)]
-#[error("No entity found for {}", self.0)]
-pub struct ElementLookupError(Id);
-
-impl ElementLookup {
-    pub fn find(&self, element_id: &Id) -> Result<Entity, ElementLookupError> {
-        self.0
-            .get(element_id)
-            .copied()
-            .ok_or(ElementLookupError(*element_id))
-    }
-
-    pub fn insert(&mut self, element_id: Id, entity: Entity) {
-        self.0.insert(element_id, entity);
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&Id, &Entity)> {
-        self.0.iter()
-    }
-}
-
-fn track_element_ids(
-    q_added_ids: Query<(&ElementId, Entity), Added<ElementId>>,
-    mut q_removed_ids: RemovedComponents<ElementId>,
-    mut lookup: ResMut<ElementLookup>,
-) {
-    for (id, entity) in q_added_ids.iter() {
-        lookup.0.insert(**id, entity);
-    }
-
-    for entity in q_removed_ids.read() {
-        lookup.0.retain(|_, e| *e != entity);
-    }
 }
 
 pub fn apply_pending_changes(mut pending_changes: ResMut<PendingChanges>, mut commands: Commands) {
@@ -361,7 +319,7 @@ fn restore_state(trigger: Trigger<RestoreState>, world: &mut World) -> Result {
                 // Create
                 info!("element is NOT cur state and will be created: {}", elem_id);
                 builder
-                    .build_create(NewElemId::Loaded(*elem_id), info, params)
+                    .build_create(CreateId::Loaded(*elem_id), info, params)
                     .apply_to_world(world);
             }
         });
@@ -469,11 +427,10 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<IdGen>();
     app.init_resource::<ElementLookup>();
     app.init_resource::<PendingChanges>();
-    app.add_systems(Startup, new_test_map);
+    app.add_systems(Startup, init_map);
     app.add_systems(
         Update,
         (
-            new_thing.run_if(input_just_pressed(KeyCode::KeyF)),
             undo.run_if(input_just_pressed(Binding::Undo)),
             redo.run_if(input_just_pressed(Binding::Redo)),
             track_element_ids,
@@ -485,6 +442,7 @@ pub fn plugin(app: &mut App) {
     app.add_observer(update_cur_hist_node);
     app.init_resource::<ElementRoleRegistry>();
     app.register_map_element_role::<Brush>();
+    app.register_map_element_role::<Light>();
 }
 
 #[derive(Resource)]

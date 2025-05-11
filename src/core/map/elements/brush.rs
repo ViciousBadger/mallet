@@ -181,7 +181,7 @@ impl Change for UpdateElemParams<Brush> {
                     let entity_id = lookup.find(&change.elem_id)?;
                     let mut entity = commands.entity(entity_id);
                     //let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
-                    let brush = change.new_params.clone();
+                    let brush = change.params.clone();
 
                     info!("spawning/updating brush: {:?}", brush);
 

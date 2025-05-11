@@ -7,10 +7,15 @@ use bevy::{
 use crate::{
     core::{
         binds::{Binding, InputBindingSystem},
-        map::elements::{
-            brush::{Brush, BrushBounds},
-            light::{Light, LightType},
-            ElementEntity,
+        map::{
+            changes::{
+                Change, CreateElem, CreateId, PendingChanges, RemoveElement, UpdateElemParams,
+            },
+            elements::{
+                brush::{Brush, BrushBounds},
+                light::{Light, LightType},
+                ElementEntity, Info,
+            },
         },
     },
     editor::{
@@ -36,7 +41,7 @@ pub struct BuildBrushProcess {
 
 #[derive(Resource)]
 pub struct ResizeBrushProcess {
-    pub elem: ElementEntity,
+    pub target: ElementEntity,
     pub side: Facing3d,
 }
 
@@ -62,15 +67,20 @@ fn end_building_brush_here(
     process: Res<BuildBrushProcess>,
     sel_pos: Res<SelectedPos>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
-    // mut map_changes: EventWriter<MapChange>,
+    mut map_changes: ResMut<PendingChanges>,
 ) {
     let start = process.start;
     let end = **sel_pos;
     let bounds = BrushBounds::new(start, end);
 
     if bounds.is_valid() {
-        // map_changes.write(MapChange::Add(MapNode::Brush(Brush { bounds })));
-        info!("todo");
+        map_changes.push_single(CreateElem {
+            id: CreateId::Generated,
+            info: Info {
+                name: "a brush".to_string(),
+            },
+            params: Brush { bounds },
+        });
         next_editor_action.set(EditorAction::None);
     }
 }
@@ -110,11 +120,10 @@ fn start_resizing_brush(
     mut commands: Commands,
 ) {
     next_editor_action.set(EditorAction::ResizeBrush);
-    // commands.insert_resource(ResizeBrushProcess {
-    //     elem_id: sel_target.focused,
-    //     side: sel_target_brush_side.0,
-    // });
-    info!("todo");
+    commands.insert_resource(ResizeBrushProcess {
+        target: sel_target.focused,
+        side: sel_target_brush_side.0,
+    });
 }
 
 fn live_brush_resize(
@@ -123,11 +132,10 @@ fn live_brush_resize(
     q_brushes: Query<&Brush>,
     // mut deploy_events: EventWriter<DeployMapNode>,
 ) {
-    //let brush = q_brushes.get(process.elem_id.entity).unwrap();
-    // let resized_brush = Brush {
-    //     bounds: brush.bounds.resized(process.side, **sel_pos),
-    // };
-    info!("todo");
+    let brush = q_brushes.get(process.target.entity).unwrap();
+    let resized_brush = Brush {
+        bounds: brush.bounds.resized(process.side, **sel_pos),
+    };
     // deploy_events.write(DeployMapNode {
     //     target_entity: process.elem_id.entity,
     //     node: MapNode::Brush(resized_brush),
@@ -139,20 +147,18 @@ fn end_resizing_brush_here(
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
     // map: Res<Map>,
-    // mut mod_events: EventWriter<MapChange>,
+    mut map_changes: ResMut<PendingChanges>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
 ) {
-    // let brush = q_brushes.get(process.elem_id.entity).unwrap();
-    // let resized_bounds = brush.bounds.resized(process.side, **sel_pos);
-    // let MapNode::Brush(mut brush) = map.get_node(&process.elem_id.node_id).unwrap().clone() else {
-    //     panic!("notabrush")
-    // };
-    // brush.bounds = resized_bounds;
-    // mod_events.write(MapChange::Modify(
-    //     process.elem_id.node_id,
-    //     MapNode::Brush(brush),
-    // ));
-    info!("todo");
+    let mut brush = q_brushes.get(process.target.entity).unwrap().clone();
+    let resized_bounds = brush.bounds.resized(process.side, **sel_pos);
+
+    brush.bounds = resized_bounds;
+    map_changes.push_single(UpdateElemParams {
+        elem_id: process.target.element_id,
+        params: brush,
+    });
+
     next_editor_action.set(EditorAction::None);
 }
 
@@ -160,17 +166,13 @@ fn resize_brush_cleanup(mut commands: Commands) {
     commands.remove_resource::<ResizeBrushProcess>();
 }
 
-fn remove_node(
-    sel_target: Res<SelectionTargets>,
-    //mut mod_events: EventWriter<MapChange>
-) {
-    //mod_events.write(MapChange::Remove(sel_target.focused.node_id));
+fn remove_node(sel_target: Res<SelectionTargets>, mut map_changes: ResMut<PendingChanges>) {
+    map_changes.push_single(RemoveElement {
+        elem_id: sel_target.focused.element_id,
+    });
 }
 
-fn add_light(
-    sel_pos: Res<SelectedPos>,
-    // mut mod_events: EventWriter<MapChange>
-) {
+fn add_light(sel_pos: Res<SelectedPos>, mut map_changes: ResMut<PendingChanges>) {
     let light = Light {
         position: **sel_pos,
         light_type: LightType::Point,
@@ -178,7 +180,13 @@ fn add_light(
         intensity: 30000.0,
         range: 20.0,
     };
-    // mod_events.write(MapChange::Add(MapNode::Light(light)));
+    map_changes.push_single(CreateElem {
+        id: CreateId::Generated,
+        info: Info {
+            name: "a light".to_string(),
+        },
+        params: light,
+    });
 }
 
 pub fn plugin(app: &mut App) {

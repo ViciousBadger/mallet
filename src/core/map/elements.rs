@@ -12,7 +12,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use crate::{
     core::db::Object,
     core::map::{
-        changes::{Change, CreateElem, NewElemId, UpdateElemParams},
+        changes::{Change, CreateElem, CreateId, UpdateElemParams},
         elements::{brush::Brush, light::Light},
     },
     id::Id,
@@ -33,7 +33,7 @@ impl ElementId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ElementEntity {
     pub element_id: Id,
-    pub entity_id: Entity,
+    pub entity: Entity,
 }
 
 #[derive(Component, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
@@ -68,7 +68,7 @@ pub struct ElementRoleRegistry {
 }
 
 pub trait ChangeBuilder: Send + Sync + 'static {
-    fn build_create(&self, id: NewElemId, info: Info, raw_params: Object) -> Box<dyn Change>;
+    fn build_create(&self, id: CreateId, info: Info, raw_params: Object) -> Box<dyn Change>;
     fn build_update(&self, id: Id, raw_params: Object) -> Box<dyn Change>;
 }
 
@@ -85,7 +85,7 @@ where
     CreateElem<R>: Change,
     UpdateElemParams<R>: Change,
 {
-    fn build_create(&self, id: NewElemId, info: Info, raw_params: Object) -> Box<dyn Change> {
+    fn build_create(&self, id: CreateId, info: Info, raw_params: Object) -> Box<dyn Change> {
         let params = raw_params.cast::<R>();
         Box::new(CreateElem { id, info, params })
     }
@@ -94,7 +94,7 @@ where
         let new_params = raw_params.cast::<R>();
         Box::new(UpdateElemParams {
             elem_id,
-            new_params,
+            params: new_params,
         })
     }
 }
