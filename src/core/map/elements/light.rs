@@ -25,6 +25,7 @@ impl Change for UpdateElemParams<Light> {
         let light = self.params.clone();
         entity.insert((
             Transform::from_translation(light.position),
+            light.clone(),
             match light.light_type {
                 LightType::Point => PointLight {
                     color: light.color,

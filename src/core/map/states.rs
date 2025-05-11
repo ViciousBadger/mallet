@@ -6,7 +6,7 @@ use crate::{
     core::{
         db::{Checksum, Db, Object, Typed, TBL_OBJECTS},
         map::{
-            elements::{brush::Brush, ElementId, Info, Role},
+            elements::{brush::Brush, light::Light, ElementId, Info, Role},
             StateSnapshot,
         },
     },
@@ -71,6 +71,8 @@ fn sync_elems(
     Ok(())
 }
 
+// TODO: This could be generalized somehow..
+
 fn sync_brush(
     db: Res<Db>,
     state: Res<State>,
@@ -97,6 +99,37 @@ fn sync_brush(
                 params: new_checksum,
             });
             info!("brush inserted {:?}", id);
+        }
+    }
+    Ok(())
+}
+
+fn sync_light(
+    db: Res<Db>,
+    state: Res<State>,
+    q_lights: Query<(&ElementId, &Light)>,
+    mut changes: EventWriter<StateChange>,
+) -> Result {
+    info!("sync light running");
+    for (id, light) in q_lights.iter() {
+        let (new_checksum, new_light) = Object::new_typed(light);
+
+        if state
+            .elements
+            .get(id.id_ref())
+            .is_none_or(|existing| new_checksum != existing.params)
+        {
+            let writer = db.begin_write()?;
+            writer
+                .open_table(TBL_OBJECTS)?
+                .insert(&new_checksum, &new_light)?;
+            writer.commit()?;
+            changes.write(StateChange::SetParams {
+                id: **id,
+                role: Light::id_hash(),
+                params: new_checksum,
+            });
+            info!("light inserted {:?}", id);
         }
     }
     Ok(())
@@ -139,6 +172,6 @@ pub fn plugin(app: &mut App) {
     app.add_event::<StateChange>();
     app.add_systems(
         StateSnapshot,
-        ((sync_elems, sync_brush), apply_state_changes).chain(),
+        ((sync_elems, sync_brush, sync_light), apply_state_changes).chain(),
     );
 }
