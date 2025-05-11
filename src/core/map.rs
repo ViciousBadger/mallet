@@ -14,15 +14,9 @@ use crate::{
         binds::Binding,
         db::{Db, Meta, TBL_META, TBL_OBJECTS},
         map::{
-            changes::{
-                Change, ChangeSet, CreateElem,
-                CreateId::{self, Generated},
-                PendingChanges, UpdateElemInfo,
-            },
+            changes::{Change, ChangeSet, CreateId, PendingChanges, UpdateElemInfo},
             elements::{
-                brush::{Brush, BrushBounds},
-                light::Light,
-                AppRoleRegistry, ElementId, ElementRoleRegistry, Info,
+                brush::Brush, light::Light, AppRoleRegistry, ElementId, ElementRoleRegistry, Info,
             },
             history::{HistNode, TBL_HIST_NODES},
             states::TBL_STATES,

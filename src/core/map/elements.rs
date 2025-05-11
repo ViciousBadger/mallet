@@ -10,10 +10,14 @@ use bevy::{platform::collections::HashMap, prelude::*};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    core::db::Object,
-    core::map::{
-        changes::{Change, CreateElem, CreateId, UpdateElemParams},
-        elements::{brush::Brush, light::Light},
+    core::{
+        db::Object,
+        map::{
+            changes::{Change, CreateElem, CreateId, UpdateElemParams},
+            elements::{brush::Brush, light::Light},
+            states::sync_params,
+            StateSnapshot,
+        },
     },
     id::Id,
 };
@@ -41,7 +45,9 @@ pub struct Info {
     pub name: String,
 }
 
-pub trait Role: Send + Sync + DeserializeOwned + std::fmt::Debug + Clone {
+pub trait Role:
+    Send + Sync + std::fmt::Debug + Clone + Serialize + DeserializeOwned + Component
+{
     fn id() -> &'static str;
     fn id_hash() -> u64 {
         let mut s = DefaultHasher::new();
@@ -130,5 +136,6 @@ impl AppRoleRegistry for App {
         self.world_mut()
             .resource_mut::<ElementRoleRegistry>()
             .register::<R>();
+        self.add_systems(StateSnapshot, sync_params::<R>);
     }
 }
