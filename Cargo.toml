@@ -10,8 +10,7 @@ opt-level = 1
 opt-level = 3
 
 [dependencies]
-# avian3d = "0.2.1"
-avian3d = { git = "https://github.com/Jondolf/avian.git", branch = "main" }
+avian3d = "0.3.0"
 bevy = { version = "0.16.0", features = ["dynamic_linking", "wayland"] }
 bimap = "0.6.3"
 blake3 = { version = "1.8.2", features = ["serde"] }
