@@ -64,8 +64,14 @@ pub trait ChangeBuilder: Send + Sync + 'static {
     fn build_update(&self, id: Id, raw_params: Object) -> Box<dyn Change>;
 }
 
-struct ChangeBuilderForRole<R>(PhantomData<R>);
-impl<R> ChangeBuilder for ChangeBuilderForRole<R>
+struct RoleChangeBuilder<R>(PhantomData<R>);
+impl<R> RoleChangeBuilder<R> {
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<R> ChangeBuilder for RoleChangeBuilder<R>
 where
     R: Role + 'static,
     CreateElem<R>: Change,
@@ -93,12 +99,12 @@ impl ElementRoleRegistry {
         UpdateElemParams<R>: Change,
     {
         let id_hash = R::id_hash();
-        let builder: ChangeBuilderForRole<R> = ChangeBuilderForRole(PhantomData);
+        let builder: RoleChangeBuilder<R> = RoleChangeBuilder::new();
         self.roles.insert(id_hash, Box::new(builder));
     }
 }
 
-pub trait AppRoles {
+pub trait AppRoleRegistry {
     fn register_map_element_role<R>(&mut self)
     where
         R: Role + 'static,
@@ -106,7 +112,7 @@ pub trait AppRoles {
         UpdateElemParams<R>: Change;
 }
 
-impl AppRoles for App {
+impl AppRoleRegistry for App {
     fn register_map_element_role<R>(&mut self)
     where
         R: Role + 'static,

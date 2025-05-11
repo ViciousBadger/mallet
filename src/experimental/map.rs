@@ -19,9 +19,9 @@ use crate::{
             PendingChanges, UpdateElemInfo, UpdateElemParams,
         },
         db::{Db, Meta, Object, TBL_META, TBL_OBJECTS},
-        elements::{AppRoles, ChangeBuilder, ElementId, ElementRoleRegistry, Info},
+        elements::{AppRoleRegistry, ChangeBuilder, ElementId, ElementRoleRegistry, Info},
         history::{HistNode, TBL_HIST_NODES},
-        states::TBL_STATES,
+        states::{ElementState, TBL_STATES},
     },
     id::{Id, IdGen},
 };
@@ -72,6 +72,9 @@ fn new_test_map(mut commands: Commands, mut id_gen: ResMut<IdGen>) -> Result {
                     state_id: initial_state_id,
                 },
             )?;
+
+            // Init the object table so it exists even if no objects are written.
+            writer.open_table(TBL_OBJECTS)?;
 
             let mut tbl_meta = writer.open_table(TBL_META)?;
             tbl_meta.insert(
@@ -135,6 +138,7 @@ fn new_thing(mut changes: ResMut<PendingChanges>) {
 
     info!("ok, pushed some changes.");
 }
+
 fn undo() {}
 fn redo() {}
 
@@ -187,7 +191,7 @@ pub fn apply_pending_changes(mut pending_changes: ResMut<PendingChanges>, mut co
 fn try_apply_change_set(change_set: In<ChangeSet>, world: &mut World) {
     if let Err(err) = world.run_system_cached_with(apply_change_set, change_set.0) {
         error!("Failed to apply change set: {}", err);
-        //maybe remove any residual State resource
+        world.remove_resource::<states::State>();
     }
 }
 
@@ -265,6 +269,8 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
     );
 
     // TODO: update children of the ole node
+    //
+    // TODO: Here might be a good place to clean up the history, preventing file bloat.
 
     Ok(())
 }
