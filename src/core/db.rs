@@ -3,6 +3,7 @@ use std::{marker::PhantomData, sync::Arc};
 use bevy::prelude::*;
 use redb::{Database, TableDefinition, TypeName};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use thiserror::Error;
 use ulid::Ulid;
 
 use crate::id::Id;
@@ -235,6 +236,26 @@ where
     }
 
     fn type_name() -> TypeName {
-        TypeName::new(&format!("Card<{}>", std::any::type_name::<T>()))
+        TypeName::new(std::any::type_name::<T>())
+    }
+}
+
+#[derive(Error, Debug)]
+#[error("Invalid database key - not found")]
+pub struct NotFound;
+
+pub trait EnsureExists {
+    type Output;
+    fn ensure_exists(self) -> Result<Self::Output>;
+}
+
+impl<V> EnsureExists for Option<redb::AccessGuard<'static, V>>
+where
+    V: redb::Value + 'static,
+{
+    type Output = redb::AccessGuard<'static, V>;
+
+    fn ensure_exists(self) -> Result<Self::Output> {
+        Ok(self.ok_or(NotFound)?)
     }
 }

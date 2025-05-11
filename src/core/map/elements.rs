@@ -93,7 +93,11 @@ where
 {
     fn build_create(&self, id: CreateId, info: Info, raw_params: Object) -> Box<dyn Change> {
         let params = raw_params.cast::<R>();
-        Box::new(CreateElem { id, info, params })
+        Box::new(CreateElem {
+            id_mode: id,
+            info,
+            params,
+        })
     }
 
     fn build_update(&self, elem_id: Id, raw_params: Object) -> Box<dyn Change> {

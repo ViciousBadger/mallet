@@ -9,17 +9,19 @@ use crate::{
         binds::{Binding, InputBindingSystem},
         map::{
             changes::{
-                Change, CreateElem, CreateId, PendingChanges, RemoveElement, UpdateElemParams,
+                Change, CreateElem, CreateId, PendingChanges, PushTempChange, RemoveElement,
+                UpdateElemParams,
             },
             elements::{
                 brush::{Brush, BrushBounds},
                 light::{Light, LightType},
                 ElementEntity, Info,
             },
+            states::CheckoutElement,
         },
     },
     editor::{
-        selection::{SelTargetBrushSide, SelectedPos, SelectionTargets},
+        selection::{SelTargetBrushSide, SelectedPos, SelectionChanged, SelectionTargets},
         EditorSystems,
     },
     id::Id,
@@ -75,7 +77,7 @@ fn end_building_brush_here(
 
     if bounds.is_valid() {
         map_changes.push_single(CreateElem {
-            id: CreateId::Generated,
+            id_mode: CreateId::Generated,
             info: Info {
                 name: "a brush".to_string(),
             },
@@ -130,12 +132,17 @@ fn live_brush_resize(
     sel_pos: Res<SelectedPos>,
     process: Res<ResizeBrushProcess>,
     q_brushes: Query<&Brush>,
+    mut commands: Commands,
     // mut deploy_events: EventWriter<DeployMapNode>,
 ) {
     let brush = q_brushes.get(process.target.entity).unwrap();
     let resized_brush = Brush {
         bounds: brush.bounds.resized(process.side, **sel_pos),
     };
+    commands.trigger(PushTempChange::new(UpdateElemParams {
+        elem_id: process.target.element_id,
+        params: resized_brush,
+    }));
     // deploy_events.write(DeployMapNode {
     //     target_entity: process.elem_id.entity,
     //     node: MapNode::Brush(resized_brush),
@@ -149,6 +156,7 @@ fn end_resizing_brush_here(
     // map: Res<Map>,
     mut map_changes: ResMut<PendingChanges>,
     mut next_editor_action: ResMut<NextState<EditorAction>>,
+    mut commands: Commands,
 ) {
     let mut brush = q_brushes.get(process.target.entity).unwrap().clone();
     let resized_bounds = brush.bounds.resized(process.side, **sel_pos);
@@ -158,12 +166,18 @@ fn end_resizing_brush_here(
         elem_id: process.target.element_id,
         params: brush,
     });
-
+    commands.remove_resource::<ResizeBrushProcess>();
     next_editor_action.set(EditorAction::None);
 }
 
-fn resize_brush_cleanup(mut commands: Commands) {
-    commands.remove_resource::<ResizeBrushProcess>();
+fn resize_brush_cleanup(process: Option<Res<ResizeBrushProcess>>, mut commands: Commands) {
+    if let Some(process) = process {
+        warn!("resetting a brush {}", process.target.element_id);
+        commands.trigger(CheckoutElement {
+            id: process.target.element_id,
+        });
+        commands.remove_resource::<ResizeBrushProcess>();
+    }
 }
 
 fn remove_node(sel_target: Res<SelectionTargets>, mut map_changes: ResMut<PendingChanges>) {
@@ -181,7 +195,7 @@ fn add_light(sel_pos: Res<SelectedPos>, mut map_changes: ResMut<PendingChanges>)
         range: 20.0,
     };
     map_changes.push_single(CreateElem {
-        id: CreateId::Generated,
+        id_mode: CreateId::Generated,
         info: Info {
             name: "a light".to_string(),
         },
@@ -234,7 +248,8 @@ pub fn plugin(app: &mut App) {
                 )
                     .run_if(in_state(EditorAction::BuildBrush)),
                 (
-                    live_brush_resize.run_if(resource_exists::<SelectedPos>),
+                    live_brush_resize
+                        .run_if(resource_exists::<SelectedPos>.and(on_event::<SelectionChanged>)),
                     end_resizing_brush_here.run_if(
                         resource_exists::<SelectedPos>.and(input_just_released(Binding::Primary)),
                     ),

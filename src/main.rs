@@ -6,7 +6,7 @@ mod game;
 mod id;
 mod util;
 
-use avian3d::PhysicsPlugins;
+use avian3d::{prelude::PhysicsInterpolationPlugin, PhysicsPlugins};
 use bevy::prelude::*;
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::Result;
@@ -35,6 +35,7 @@ fn main() -> Result<()> {
                 .add_plugins((
                     app_data::plugin,
                     DefaultPlugins,
+                    //PhysicsPlugins::default().set(PhysicsInterpolationPlugin::interpolate_all()),
                     PhysicsPlugins::default(),
                     core::plugin,
                     editor::plugin,

@@ -183,8 +183,6 @@ impl Change for UpdateElemParams<Brush> {
                     //let mut entity = get_elem_entity(world, &self.elem_id).unwrap();
                     let brush = change.params.clone();
 
-                    info!("spawning/updating brush: {:?}", brush);
-
                     // Brush will use base entity as a container for sides.
                     let center = brush.bounds.center();
                     let size = brush.bounds.size();
