@@ -113,9 +113,10 @@ impl redb::Value for Checksum {
 }
 
 impl redb::Key for Checksum {
-    fn compare(_: &[u8], _: &[u8]) -> std::cmp::Ordering {
+    fn compare(sum1: &[u8], sum2: &[u8]) -> std::cmp::Ordering {
         // No reason to sort hash values.
-        std::cmp::Ordering::Equal
+        //std::cmp::Ordering::Equal
+        sum1.cmp(sum2)
     }
 }
 
