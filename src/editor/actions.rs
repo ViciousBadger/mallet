@@ -9,7 +9,7 @@ use crate::{
         binds::{Binding, InputBindingSystem},
         map::{
             changes::{
-                Change, CreateElem, CreateId, PendingChanges, PushTempChange, RemoveElement,
+                Change, CreateElem, CreateId, PendingChanges, UntrackedChange, RemoveElement,
                 UpdateElemParams,
             },
             elements::{
@@ -139,7 +139,7 @@ fn live_brush_resize(
     let resized_brush = Brush {
         bounds: brush.bounds.resized(process.side, **sel_pos),
     };
-    commands.trigger(PushTempChange::new(UpdateElemParams {
+    commands.trigger(UntrackedChange::new(UpdateElemParams {
         elem_id: process.target.element_id,
         params: resized_brush,
     }));

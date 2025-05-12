@@ -115,7 +115,12 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             PreUpdate,
             (
-                exit_app.run_if(input_just_pressed(Binding::Quit)),
+                (
+                    update_editor_context.run_if(in_state(AppState::InEditor)),
+                    exit_app,
+                )
+                    .chain()
+                    .run_if(input_just_pressed(Binding::Quit)),
                 (
                     update_editor_context.run_if(in_state(AppState::InEditor)),
                     playtest,

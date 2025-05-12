@@ -6,6 +6,8 @@ pub mod tools;
 pub mod ui;
 
 use crate::core::{
+    db::{Db, Meta, TBL_META},
+    map::get_current_meta,
     view::{Gimbal, GimbalPos},
     AppState,
 };
@@ -39,7 +41,7 @@ fn teardown_editor(_: Commands) {
 
 /// Persistent editor state.
 /// Used when jumping back to editor after playtesting and when saving/loading map files.
-#[derive(Resource, Serialize, Deserialize, Clone)]
+#[derive(Resource, Serialize, Deserialize, Clone, Debug)]
 pub struct EditorContext {
     pub camera_pos: GimbalPos,
     pub cursor: SpatialCursor,
@@ -62,6 +64,7 @@ impl Default for EditorContext {
 
 pub fn update_editor_context(
     cursor: Res<SpatialCursor>,
+    db: Option<Res<Db>>,
     q_camera: Query<(&GlobalTransform, &Gimbal)>,
     mut commands: Commands,
 ) -> Result {
@@ -70,7 +73,25 @@ pub fn update_editor_context(
         cursor: cursor.clone(),
         camera_pos: GimbalPos::new(cam_t.translation(), *cam_g),
     };
-    commands.insert_resource(new_context);
+    commands.insert_resource(new_context.clone());
+
+    // For now idk if db is always there. also maybe inserting context as resource is not even
+    // nessecary, if its already in db.
+
+    if let Some(db) = db {
+        let reader = db.begin_read()?;
+        let meta = get_current_meta(&reader)?;
+        let writer = db.begin_write()?;
+        writer.open_table(TBL_META)?.insert(
+            (),
+            Meta {
+                editor_context: new_context,
+                ..meta
+            },
+        )?;
+        writer.commit()?;
+    }
+
     Ok(())
 }
 

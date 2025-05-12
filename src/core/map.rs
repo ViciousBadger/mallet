@@ -77,6 +77,10 @@ fn init_map(
         // Load the map
         let hist_node = get_current_hist_node(&reader)?;
         restore = Some(hist_node.state_id);
+
+        // dumbly insert the editor context too late
+        let meta = get_current_meta(&reader)?;
+        commands.insert_resource(meta.editor_context);
     } else {
         // Write initial stuff
         let writer = db.begin_write()?;
@@ -105,6 +109,7 @@ fn init_map(
                 Meta {
                     name: "test map".to_string(),
                     hist_node_id: initial_hist_id,
+                    editor_context: default(),
                 },
             )?;
         }

@@ -6,7 +6,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use ulid::Ulid;
 
-use crate::id::Id;
+use crate::{editor::EditorContext, id::Id};
 
 #[derive(Resource, Deref)]
 pub struct Db {
@@ -28,6 +28,7 @@ pub const TBL_OBJECTS: TableDefinition<Checksum, Object> = TableDefinition::new(
 pub struct Meta {
     pub name: String,
     pub hist_node_id: Id,
+    pub editor_context: EditorContext,
 }
 
 impl redb::Value for Id {

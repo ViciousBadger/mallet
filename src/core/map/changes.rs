@@ -234,19 +234,20 @@ fn apply_change_set(change_set: In<ChangeSet>, world: &mut World) -> Result {
 }
 
 #[derive(Event)]
-pub struct PushTempChange(Box<dyn Change>);
-impl PushTempChange {
+/// Use to apply a change to the map without invoking a new history node and map state
+pub struct UntrackedChange(Box<dyn Change>);
+impl UntrackedChange {
     pub fn new(change: impl Change + 'static) -> Self {
         Self(Box::new(change))
     }
 }
 
-fn push_temp_change(trigger: Trigger<PushTempChange>, world: &mut World) -> Result {
+fn apply_untracked_change(trigger: Trigger<UntrackedChange>, world: &mut World) -> Result {
     trigger.0.apply_to_world(world);
     Ok(())
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_observer(push_temp_change);
+    app.add_observer(apply_untracked_change);
     app.add_systems(Last, apply_pending_changes);
 }
