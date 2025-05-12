@@ -19,7 +19,7 @@ impl FromPitchYawRoll for Quat {
     }
 }
 
-#[derive(Eq, PartialEq, Clone, Copy)]
+#[derive(Eq, PartialEq, Hash, Clone, Copy, Debug)]
 pub enum Facing3d {
     X,
     NegX,
@@ -79,5 +79,15 @@ pub fn brush_texture_settings(settings: &mut ImageLoaderSettings) {
             ..default()
         }),
         ..default()
+    }
+}
+
+/// This is possibly a bad idea, for more complex state matching
+pub fn test_state<S: States>(
+    f: impl Fn(S) -> bool + Clone,
+) -> impl FnMut(Option<Res<State<S>>>) -> bool + Clone {
+    move |current_state: Option<Res<State<S>>>| match current_state {
+        Some(current_state) => f(current_state.clone()),
+        None => false,
     }
 }
