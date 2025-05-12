@@ -27,10 +27,8 @@ rand = "0.9.1"
 redb = "2.5.0"
 ron = { version = "0.10.1", features = ["integer128"] }
 serde = { version = "1.0.219", features = ["derive"] }
-sled = { version = "0.34.7", features = ["compression"] }
 thiserror = "2.0.12"
 time = "0.3.41"
-typed-sled = "0.2.3"
 ulid = { version = "1.2.1", features = ["serde"] }
 walkdir = "2.5.0"
 wyrand = "0.3.2"

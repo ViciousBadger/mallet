@@ -14,9 +14,9 @@ pub struct Db {
 }
 
 impl Db {
-    pub fn new() -> Db {
+    pub fn new(path: &str) -> Db {
         Db {
-            backing: Arc::new(Database::builder().create("test.mmap").unwrap()),
+            backing: Arc::new(Database::builder().create(path).unwrap()),
         }
     }
 }

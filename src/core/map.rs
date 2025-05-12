@@ -9,6 +9,7 @@ use redb::ReadTransaction;
 use thiserror::Error;
 
 use crate::{
+    app_data::{self, AppDataPath},
     core::{
         db::{Db, EnsureExists, Meta, TBL_META, TBL_OBJECTS},
         map::{
@@ -23,6 +24,16 @@ use crate::{
     id::{Id, IdGen},
     util::brush_texture_settings,
 };
+
+pub fn db_is_initialized(reader: &ReadTransaction) -> bool {
+    // This clusterfuck ensures false is returned when the meta table doesn't exist yet
+    // (redb has no "table exists" function afaik)
+    reader
+        .open_table(TBL_META)
+        .map(|table| table.get(()).unwrap_or(None).is_some())
+        .ok()
+        .is_some()
+}
 
 pub fn get_current_meta(reader: &ReadTransaction) -> Result<Meta> {
     Ok(reader
@@ -52,21 +63,18 @@ pub fn get_current_state(reader: &ReadTransaction) -> Result<MapState> {
 
 fn init_map(
     asset_server: Res<AssetServer>,
+    app_data_path: Res<AppDataPath>,
     mut commands: Commands,
     mut id_gen: ResMut<IdGen>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) -> Result {
-    let db = Db::new();
+    let db_path = format!("{}/map.mmap", app_data_path.get());
+    let db = Db::new(&db_path);
 
     let mut restore: Option<Id> = None;
-    if let Some(meta) = db
-        .begin_read()?
-        .open_table(TBL_META)
-        .map(|table| table.get(()).unwrap_or(None).map(|guard| guard.value()))
-        .unwrap_or(None)
-    {
+    let reader = db.begin_read()?;
+    if db_is_initialized(&reader) {
         // Load the map
-        let reader = db.begin_read()?;
         let hist_node = get_current_hist_node(&reader)?;
         restore = Some(hist_node.state_id);
     } else {
